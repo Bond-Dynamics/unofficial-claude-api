@@ -189,8 +189,6 @@ Here's an example of this json:
 }
 ```
 
-__________
-
 ### Manual Session Data
 
 If for whatever reason you'd like to avoid auto session gathering using selenium,
@@ -208,8 +206,6 @@ organization_id = "<org_uuid>"
 
 session = SessionData(cookie_header_value, user_agent, organization_id)
 ```
-
-__________
 
 ### Using Proxies
 
@@ -259,8 +255,6 @@ session = SessionData(...)
 client = ClaudeAPIClient(session, proxy=socks_proxy)
 ```
 
-__________
-
 ## Customization
 
 ### Changing Claude model
@@ -278,8 +272,6 @@ client = ClaudeAPIClient(session, model_name="claude-2.0")
 ```
 
 You can retrieve the `model_name` strings from the [official API docs](https://docs.anthropic.com/claude/docs/models-overview#model-comparison)
-
-__________
 
 ### Changing Organization
 
