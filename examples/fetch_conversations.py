@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -16,6 +17,35 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15"
 )
+
+# Artifact type to file extension mapping
+_ARTIFACT_EXTENSIONS = {
+    "application/vnd.ant.react": ".jsx",
+    "application/vnd.ant.code": None,  # uses language attribute
+    "application/vnd.ant.mermaid": ".mmd",
+    "text/html": ".html",
+    "text/markdown": ".md",
+    "text/plain": ".txt",
+    "text/csv": ".csv",
+    "text/css": ".css",
+    "image/svg+xml": ".svg",
+    "application/json": ".json",
+    "application/xml": ".xml",
+    "application/x-latex": ".tex",
+    "text/vnd.graphviz": ".dot",
+}
+
+_LANGUAGE_EXTENSIONS = {
+    "javascript": ".js", "typescript": ".ts", "python": ".py",
+    "java": ".java", "c": ".c", "cpp": ".cpp", "ruby": ".rb",
+    "php": ".php", "swift": ".swift", "go": ".go", "rust": ".rs",
+    "tsx": ".tsx", "jsx": ".jsx", "shell": ".sh", "bash": ".sh",
+    "sql": ".sql", "kotlin": ".kt", "scala": ".scala", "r": ".r",
+    "json": ".json", "xml": ".xml", "yaml": ".yaml", "yml": ".yml",
+    "markdown": ".md", "html": ".html", "css": ".css", "scss": ".scss",
+    "svg": ".svg", "mermaid": ".mmd", "latex": ".tex", "toml": ".toml",
+    "lua": ".lua", "dart": ".dart", "haskell": ".hs",
+}
 
 
 def find_default_firefox_profile():
@@ -106,6 +136,148 @@ def format_date(date_str):
         return date_str
 
 
+def _extract_artifacts_from_text(text):
+    """Extract artifacts from <antArtifact> XML tags in message text (old format)."""
+    pattern = re.compile(
+        r'<antArtifact\s+([^>]*)>([\s\S]*?)</antArtifact>', re.DOTALL
+    )
+    artifacts = []
+    for match in pattern.finditer(text):
+        attrs_str, content = match.group(1), match.group(2).strip()
+        attrs = dict(re.findall(r'(\w+)="([^"]*)"', attrs_str))
+
+        artifact_type = attrs.get("type", "")
+        language = attrs.get("language", "")
+        ext = _ARTIFACT_EXTENSIONS.get(artifact_type)
+        if ext is None:
+            ext = _LANGUAGE_EXTENSIONS.get(language, ".txt")
+
+        artifacts.append({
+            "identifier": attrs.get("identifier", ""),
+            "title": attrs.get("title", "Untitled"),
+            "type": artifact_type,
+            "language": language,
+            "extension": ext,
+            "content": content,
+        })
+    return artifacts
+
+
+def _extract_artifacts_from_content(content_blocks):
+    """Extract artifacts from message content array (new format with rendering_mode=messages)."""
+    artifacts = []
+    for block in content_blocks:
+        # New format: tool_use with display_content
+        if block.get("type") == "tool_use" and block.get("display_content"):
+            dc = block["display_content"]
+
+            # code_block format (newer)
+            if dc.get("type") == "code_block" and dc.get("code"):
+                language = dc.get("language", "txt")
+                filename = dc.get("filename", "artifact")
+                ext = _LANGUAGE_EXTENSIONS.get(language, ".txt")
+                title = filename.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+                artifacts.append({
+                    "identifier": block.get("id", ""),
+                    "title": title,
+                    "type": f"application/vnd.ant.code",
+                    "language": language,
+                    "extension": ext,
+                    "content": dc["code"].strip(),
+                })
+
+            # json_block format (older new-format)
+            elif dc.get("type") == "json_block" and dc.get("json_block"):
+                try:
+                    data = json.loads(dc["json_block"])
+                    if data.get("filename"):
+                        language = data.get("language", "txt")
+                        ext = _LANGUAGE_EXTENSIONS.get(language, ".txt")
+                        title = data["filename"].rsplit("/", 1)[-1].rsplit(".", 1)[0]
+                        artifacts.append({
+                            "identifier": block.get("id", ""),
+                            "title": title,
+                            "type": "application/vnd.ant.code",
+                            "language": language,
+                            "extension": ext,
+                            "content": data.get("code", "").strip(),
+                        })
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        # Also check text blocks for old-format <antArtifact> tags
+        if block.get("type") == "text" and block.get("text"):
+            artifacts.extend(_extract_artifacts_from_text(block["text"]))
+
+    return artifacts
+
+
+def extract_artifacts(message):
+    """Extract all artifacts from a message, handling both old and new formats.
+
+    Returns list of artifact dicts with: identifier, title, type, language,
+    extension, content.
+    """
+    artifacts = []
+
+    # New format: message has content array
+    if isinstance(message.get("content"), list):
+        artifacts.extend(_extract_artifacts_from_content(message["content"]))
+
+    # Old format: message has text string
+    if isinstance(message.get("text"), str):
+        artifacts.extend(_extract_artifacts_from_text(message["text"]))
+
+    # Deduplicate by identifier (old format might also appear in content)
+    seen = set()
+    unique = []
+    for a in artifacts:
+        key = a.get("identifier") or a.get("content", "")[:100]
+        if key not in seen:
+            seen.add(key)
+            unique.append(a)
+
+    return unique
+
+
+def save_artifacts(artifacts, conversation_id, artifacts_dir):
+    """Save extracted artifacts to disk as individual files.
+
+    Returns list of saved artifact metadata (without content, for the index).
+    """
+    saved = []
+    used_filenames = set()
+
+    for artifact in artifacts:
+        title = artifact.get("title", "artifact")
+        # Sanitize filename
+        safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
+        ext = artifact.get("extension", ".txt")
+        filename = f"{safe_title}{ext}"
+
+        # Handle duplicates
+        counter = 1
+        base = safe_title
+        while filename in used_filenames:
+            filename = f"{base}_{counter}{ext}"
+            counter += 1
+        used_filenames.add(filename)
+
+        filepath = artifacts_dir / filename
+        filepath.write_text(artifact["content"], encoding="utf-8")
+
+        saved.append({
+            "filename": filename,
+            "identifier": artifact.get("identifier", ""),
+            "title": artifact.get("title", ""),
+            "type": artifact.get("type", ""),
+            "language": artifact.get("language", ""),
+            "size": len(artifact["content"]),
+        })
+
+    return saved
+
+
 def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting conversation sync")
 
@@ -182,10 +354,13 @@ def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conversations_dir = DATA_DIR / "conversations"
     conversations_dir.mkdir(exist_ok=True)
+    artifacts_dir = DATA_DIR / "artifacts"
+    artifacts_dir.mkdir(exist_ok=True)
 
-    # Fetch full data for each conversation
-    print("Fetching full conversation data...")
+    # Fetch full data for each conversation (with artifacts via rendering_mode=messages)
+    print("Fetching full conversation data (with artifacts)...")
     full_conversations = []
+    total_artifacts = 0
     for i, chat in enumerate(conversations):
         chat_id = chat.get("uuid", "")
         name = chat.get("name") or "(Untitled)"
@@ -197,12 +372,17 @@ def main():
             existing = json.loads(chat_file.read_text())
             if existing.get("updated_at") == chat.get("updated_at"):
                 full_conversations.append(existing)
+                total_artifacts += existing.get("_artifact_count", 0)
                 print(f"  {progress} Skipped (unchanged): {name}")
                 continue
 
-        # Fetch full conversation with messages
+        # Fetch with artifact-aware endpoint
+        # tree=True returns message tree, rendering_mode=messages returns
+        # structured content array with artifacts, render_all_tools=true
+        # includes tool use blocks (artifacts are tool_use with display_content)
         chat_data = api_get(
-            f"/api/organizations/{org_id}/chat_conversations/{chat_id}",
+            f"/api/organizations/{org_id}/chat_conversations/{chat_id}"
+            f"?tree=True&rendering_mode=messages&render_all_tools=true",
             cookie,
         )
 
@@ -213,13 +393,35 @@ def main():
                 project_map.get(project_id, "No Project") if project_id else "No Project"
             )
 
+            # Extract and save artifacts from all messages
+            # Clear stale artifacts from previous fetch to avoid duplicates
+            conv_artifacts_dir = artifacts_dir / chat_id
+            if conv_artifacts_dir.exists():
+                shutil.rmtree(conv_artifacts_dir)
+            conv_artifact_count = 0
+
+            for msg in chat_data.get("chat_messages", []):
+                artifacts = extract_artifacts(msg)
+                if artifacts:
+                    conv_artifacts_dir.mkdir(exist_ok=True)
+                    saved = save_artifacts(artifacts, chat_id, conv_artifacts_dir)
+                    conv_artifact_count += len(saved)
+
+                    # Attach artifact metadata to the message for reference
+                    msg["_artifacts"] = saved
+
+            if conv_artifact_count > 0:
+                chat_data["_artifact_count"] = conv_artifact_count
+                total_artifacts += conv_artifact_count
+
             # Save individual conversation
             chat_file.write_text(
                 json.dumps(chat_data, indent=2, ensure_ascii=False)
             )
             full_conversations.append(chat_data)
             msg_count = len(chat_data.get("chat_messages", []))
-            print(f"  {progress} Saved ({msg_count} msgs): {name}")
+            artifact_note = f", {conv_artifact_count} artifacts" if conv_artifact_count else ""
+            print(f"  {progress} Saved ({msg_count} msgs{artifact_note}): {name}")
         else:
             print(f"  {progress} Failed to fetch: {name}")
 
@@ -252,6 +454,7 @@ def main():
         "organization_id": org_id,
         "total_conversations": len(full_conversations),
         "total_projects": len(project_map),
+        "total_artifacts": total_artifacts,
         "projects": {
             name: [
                 {
@@ -261,6 +464,7 @@ def main():
                     "created_at": c.get("created_at"),
                     "updated_at": c.get("updated_at"),
                     "message_count": len(c.get("chat_messages", [])),
+                    "artifact_count": c.get("_artifact_count", 0),
                     "project_name": name,
                 }
                 for c in chats
@@ -276,9 +480,29 @@ def main():
     print(f"\nSync complete!")
     print(f"  Conversations: {len(full_conversations)}")
     print(f"  Projects:      {len(project_map)}")
+    print(f"  Artifacts:     {total_artifacts}")
     print(f"  Data dir:      {DATA_DIR}")
     print(f"  Index:         {index_file}")
     print(f"  Conversations: {conversations_dir}/")
+    print(f"  Artifacts:     {artifacts_dir}/")
+
+    # Auto-embed if MongoDB is available
+    try:
+        from vectordb.db import is_mongodb_available
+
+        if is_mongodb_available():
+            print("\nMongoDB detected. Running embedding pipeline...")
+            from vectordb.pipeline import run_pipeline
+
+            run_pipeline()
+        else:
+            print("\nMongoDB not running. Skipping embedding step.")
+            print("  Start it with: scripts/start_mongodb.sh")
+    except ImportError:
+        print("\nVector search not installed. Skipping embedding.")
+        print("  Install with: pip3 install pymongo voyageai")
+    except Exception as err:
+        print(f"\nEmbedding step failed (sync still succeeded): {err}")
 
 
 if __name__ == "__main__":
