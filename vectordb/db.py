@@ -3,11 +3,14 @@ from pymongo.errors import OperationFailure
 
 from vectordb.config import (
     COLLECTION_ARCHIVE,
+    COLLECTION_CODE_REPOS,
+    COLLECTION_CODE_SESSIONS,
     COLLECTION_CONVERSATIONS,
     COLLECTION_DOCUMENTS,
     COLLECTION_EVENTS,
     COLLECTION_MESSAGES,
     COLLECTION_PATTERNS,
+    COLLECTION_PUBLISHED_ARTIFACTS,
     COLLECTION_SCRATCHPAD,
     DATABASE_NAME,
     EMBEDDING_DIMENSIONS,
@@ -206,6 +209,35 @@ def ensure_forge_indexes(db=None):
     events.create_index("timestamp")
     events.create_index("expires_at", expireAfterSeconds=0)
 
+    # --- Published artifacts collection ---
+    published_artifacts = db[COLLECTION_PUBLISHED_ARTIFACTS]
+    published_artifacts.create_index("artifact_uuid", unique=True)
+    published_artifacts.create_index("conversation_id")
+    published_artifacts.create_index("project_name")
+    published_artifacts.create_index("content_type")
+    _create_filtered_vector_index(
+        published_artifacts,
+        VECTOR_INDEX_NAME,
+        filter_fields=["content_type", "project_name"],
+    )
+
+    # --- Code sessions collection ---
+    code_sessions = db[COLLECTION_CODE_SESSIONS]
+    code_sessions.create_index("session_id", unique=True)
+    code_sessions.create_index("project_name")
+    code_sessions.create_index("status")
+    code_sessions.create_index("content_type")
+    _create_filtered_vector_index(
+        code_sessions,
+        VECTOR_INDEX_NAME,
+        filter_fields=["content_type", "project_name", "status"],
+    )
+
+    # --- Code repos collection (no vector index — metadata only) ---
+    code_repos = db[COLLECTION_CODE_REPOS]
+    code_repos.create_index("full_name", unique=True)
+    code_repos.create_index("owner")
+
     return {
         "messages": messages,
         "conversations": conversations,
@@ -214,6 +246,9 @@ def ensure_forge_indexes(db=None):
         "scratchpad": scratchpad,
         "archive": archive,
         "events": events,
+        "published_artifacts": published_artifacts,
+        "code_sessions": code_sessions,
+        "code_repos": code_repos,
     }
 
 

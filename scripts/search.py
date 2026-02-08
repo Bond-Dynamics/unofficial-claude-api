@@ -9,8 +9,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from vectordb.config import (
+    COLLECTION_CODE_SESSIONS,
     COLLECTION_CONVERSATIONS,
     COLLECTION_MESSAGES,
+    COLLECTION_PUBLISHED_ARTIFACTS,
     VECTOR_INDEX_NAME,
 )
 from vectordb.db import get_database
@@ -114,6 +116,74 @@ def print_message_results(results):
         print()
 
 
+def print_artifact_results(results):
+    """Format and print published artifact search results."""
+    if not results:
+        print("  No artifact results found.")
+        return
+
+    for i, doc in enumerate(results, 1):
+        score = doc.get("score", 0)
+        title = doc.get("title", "(Untitled)")
+        project = doc.get("project_name", "No Project")
+        artifact_type = doc.get("artifact_type", "")
+        language = doc.get("language", "")
+        content_type = doc.get("content_type", "")
+        content = doc.get("content", "")
+
+        display = content[:200] + "..." if len(content) > 200 else content
+        display = display.replace("\n", " ").strip()
+
+        info_parts = []
+        if artifact_type:
+            info_parts.append(f"Type: {artifact_type}")
+        if language:
+            info_parts.append(f"Lang: {language}")
+        if content_type:
+            info_parts.append(f"Class: {content_type}")
+
+        print(f"  {i}. [{score:.2f}] \"{title}\" (Project: {project})")
+        if info_parts:
+            print(f"     {' | '.join(info_parts)}")
+        if display:
+            print(f"     {display}")
+        print()
+
+
+def print_session_results(results):
+    """Format and print Claude Code session search results."""
+    if not results:
+        print("  No session results found.")
+        return
+
+    for i, doc in enumerate(results, 1):
+        score = doc.get("score", 0)
+        title = doc.get("title", "(Untitled)")
+        project = doc.get("project_name", "No Project")
+        model = doc.get("model", "")
+        status = doc.get("status", "")
+        content_type = doc.get("content_type", "")
+        summary = doc.get("summary", "")
+
+        display = summary[:200] + "..." if len(summary) > 200 else summary
+        display = display.replace("\n", " ").strip()
+
+        info_parts = []
+        if model:
+            info_parts.append(f"Model: {model}")
+        if status:
+            info_parts.append(f"Status: {status}")
+        if content_type:
+            info_parts.append(f"Class: {content_type}")
+
+        print(f"  {i}. [{score:.2f}] \"{title}\" (Project: {project})")
+        if info_parts:
+            print(f"     {' | '.join(info_parts)}")
+        if display:
+            print(f"     {display}")
+        print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Search Claude conversations using vector similarity"
@@ -121,9 +191,9 @@ def main():
     parser.add_argument("query", help="Search query text")
     parser.add_argument(
         "--scope",
-        choices=["messages", "conversations", "both"],
+        choices=["messages", "conversations", "artifacts", "sessions", "both", "all"],
         default="both",
-        help="Search scope (default: both)",
+        help="Search scope: messages, conversations, artifacts, sessions, both (msgs+convs), all (default: both)",
     )
     parser.add_argument(
         "--limit",
@@ -188,7 +258,7 @@ def main():
     starred_filter = True if args.starred else None
     query_embedding = embed_query(args.query, client=voyage)
 
-    if args.scope in ("conversations", "both"):
+    if args.scope in ("conversations", "both", "all"):
         print("=== Conversation Results ===")
         conv_results = vector_search(
             db[COLLECTION_CONVERSATIONS],
@@ -202,7 +272,7 @@ def main():
         )
         print_conversation_results(conv_results)
 
-    if args.scope in ("messages", "both"):
+    if args.scope in ("messages", "both", "all"):
         print("=== Message Results ===")
         msg_results = vector_search(
             db[COLLECTION_MESSAGES],
@@ -215,6 +285,30 @@ def main():
             model=args.model,
         )
         print_message_results(msg_results)
+
+    if args.scope in ("artifacts", "all"):
+        print("=== Published Artifact Results ===")
+        artifact_results = vector_search(
+            db[COLLECTION_PUBLISHED_ARTIFACTS],
+            query_embedding,
+            args.limit,
+            project_filter=args.project,
+            threshold=args.threshold,
+            content_type=args.content_type,
+        )
+        print_artifact_results(artifact_results)
+
+    if args.scope in ("sessions", "all"):
+        print("=== Code Session Results ===")
+        session_results = vector_search(
+            db[COLLECTION_CODE_SESSIONS],
+            query_embedding,
+            args.limit,
+            project_filter=args.project,
+            threshold=args.threshold,
+            content_type=args.content_type,
+        )
+        print_session_results(session_results)
 
 
 if __name__ == "__main__":

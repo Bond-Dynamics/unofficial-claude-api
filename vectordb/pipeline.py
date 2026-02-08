@@ -1,4 +1,4 @@
-"""Embed Claude conversations from data/conversations/ into MongoDB."""
+"""Embed Claude conversations, published artifacts, and Code sessions into MongoDB."""
 
 import json
 import sys
@@ -6,13 +6,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from vectordb.classifier import classify_content
-from vectordb.config import COLLECTION_CONVERSATIONS, COLLECTION_MESSAGES
+from vectordb.config import (
+    COLLECTION_CODE_REPOS,
+    COLLECTION_CODE_SESSIONS,
+    COLLECTION_CONVERSATIONS,
+    COLLECTION_MESSAGES,
+    COLLECTION_PUBLISHED_ARTIFACTS,
+)
 from vectordb.db import ensure_forge_indexes, get_database
 from vectordb.embeddings import embed_texts, get_voyage_client
 from vectordb.events import emit_event
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 CONVERSATIONS_DIR = DATA_DIR / "conversations"
+PUBLISHED_DIR = DATA_DIR / "published_artifacts"
+SESSIONS_DIR = DATA_DIR / "code_sessions"
+REPOS_FILE = DATA_DIR / "code_repos.json"
 
 
 def _extract_message_text(msg):
@@ -45,6 +54,227 @@ def _load_conversation(path):
         return None
 
 
+def _embed_published_artifacts(db, voyage):
+    """Embed published artifacts into the published_artifacts collection."""
+    if not PUBLISHED_DIR.exists():
+        return 0
+
+    artifact_files = sorted(PUBLISHED_DIR.glob("*.json"))
+    if not artifact_files:
+        return 0
+
+    col = db[COLLECTION_PUBLISHED_ARTIFACTS]
+    embedded = 0
+
+    for filepath in artifact_files:
+        try:
+            artifact = json.loads(filepath.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        artifact_uuid = artifact.get("published_artifact_uuid", "")
+        if not artifact_uuid:
+            continue
+
+        # Skip if already embedded
+        existing = col.find_one(
+            {"artifact_uuid": artifact_uuid},
+            {"updated_at": 1},
+        )
+        if existing and existing.get("updated_at") == artifact.get("updated_at", ""):
+            continue
+
+        # Build text for embedding from artifact content
+        content = artifact.get("artifact_content", "")
+        title = artifact.get("title", artifact.get("name", ""))
+        embed_text = f"{title}\n\n{content}"[:8000] if content else title[:4000]
+        if len(embed_text.strip()) < 5:
+            continue
+
+        content_type = classify_content(embed_text)
+        embeddings = embed_texts([embed_text], client=voyage)
+
+        # Extract conversation/project context from the artifact
+        conversation_uuid = artifact.get("conversation_uuid", "")
+        project_name = artifact.get("project_name", "")
+
+        col.update_one(
+            {"artifact_uuid": artifact_uuid},
+            {
+                "$set": {
+                    "artifact_uuid": artifact_uuid,
+                    "title": title,
+                    "content": content[:4000],
+                    "embedding": embeddings[0],
+                    "content_type": content_type,
+                    "conversation_id": conversation_uuid,
+                    "project_name": project_name,
+                    "artifact_type": artifact.get("type", ""),
+                    "language": artifact.get("language", ""),
+                    "created_at": artifact.get("created_at", ""),
+                    "updated_at": artifact.get("updated_at", ""),
+                    "metadata": {
+                        k: v for k, v in artifact.items()
+                        if k not in (
+                            "published_artifact_uuid", "artifact_content",
+                            "title", "name", "type", "language",
+                            "created_at", "updated_at", "conversation_uuid",
+                            "project_name",
+                        )
+                    },
+                }
+            },
+            upsert=True,
+        )
+        embedded += 1
+
+    return embedded
+
+
+def _embed_code_sessions(db, voyage):
+    """Embed Claude Code sessions into the code_sessions collection."""
+    if not SESSIONS_DIR.exists():
+        return 0
+
+    session_files = sorted(SESSIONS_DIR.glob("*.json"))
+    if not session_files:
+        return 0
+
+    col = db[COLLECTION_CODE_SESSIONS]
+    embedded = 0
+
+    for filepath in session_files:
+        try:
+            session = json.loads(filepath.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        session_id = session.get("id") or session.get("uuid", "")
+        if not session_id:
+            continue
+
+        # Skip if already embedded and unchanged
+        existing = col.find_one(
+            {"session_id": session_id},
+            {"updated_at": 1},
+        )
+        if existing and existing.get("updated_at") == session.get("updated_at", ""):
+            continue
+
+        # Build text from session context for embedding
+        title = session.get("title", session.get("name", ""))
+        context = session.get("session_context", {})
+        model = context.get("model", session.get("model", ""))
+
+        # Collect text from sources and outcomes if available
+        text_parts = [title] if title else []
+        for source in context.get("sources", []):
+            if isinstance(source, dict) and source.get("content"):
+                text_parts.append(str(source["content"])[:1000])
+            elif isinstance(source, str):
+                text_parts.append(source[:1000])
+        for outcome in context.get("outcomes", []):
+            if isinstance(outcome, dict) and outcome.get("content"):
+                text_parts.append(str(outcome["content"])[:1000])
+            elif isinstance(outcome, str):
+                text_parts.append(outcome[:1000])
+
+        # Also check for a summary or description
+        if session.get("summary"):
+            text_parts.append(session["summary"])
+
+        embed_text = "\n".join(text_parts)[:8000]
+        if len(embed_text.strip()) < 5:
+            continue
+
+        content_type = classify_content(embed_text)
+        embeddings = embed_texts([embed_text], client=voyage)
+
+        # Extract project context
+        project_name = session.get("project_name", "")
+        env_id = session.get("environment_id", "")
+
+        col.update_one(
+            {"session_id": session_id},
+            {
+                "$set": {
+                    "session_id": session_id,
+                    "title": title,
+                    "summary": embed_text[:2000],
+                    "embedding": embeddings[0],
+                    "content_type": content_type,
+                    "model": model,
+                    "status": session.get("status", ""),
+                    "project_name": project_name,
+                    "environment_id": env_id,
+                    "created_at": session.get("created_at", ""),
+                    "updated_at": session.get("updated_at", ""),
+                    "metadata": {
+                        "source_count": len(context.get("sources", [])),
+                        "outcome_count": len(context.get("outcomes", [])),
+                    },
+                }
+            },
+            upsert=True,
+        )
+        embedded += 1
+
+    return embedded
+
+
+def _ingest_code_repos(db):
+    """Ingest code repo metadata (no embedding — metadata only)."""
+    if not REPOS_FILE.exists():
+        return 0
+
+    try:
+        repos = json.loads(REPOS_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return 0
+
+    if not isinstance(repos, list):
+        return 0
+
+    col = db[COLLECTION_CODE_REPOS]
+    ingested = 0
+
+    for entry in repos:
+        # Handle nested {repo: {...}, status: ...} format from Claude API
+        repo = entry.get("repo", entry) if isinstance(entry, dict) else entry
+        if not isinstance(repo, dict):
+            continue
+
+        owner = repo.get("owner", {})
+        owner_login = owner.get("login", "") if isinstance(owner, dict) else ""
+        name = repo.get("name", "")
+        if not name:
+            continue
+
+        # Use owner/name as unique identifier (no UUID in this API)
+        full_name = f"{owner_login}/{name}" if owner_login else name
+
+        col.update_one(
+            {"full_name": full_name},
+            {
+                "$set": {
+                    "full_name": full_name,
+                    "name": name,
+                    "owner": owner_login,
+                    "owner_type": owner.get("type", "") if isinstance(owner, dict) else "",
+                    "default_branch": repo.get("default_branch", "main"),
+                    "visibility": repo.get("visibility", ""),
+                    "archived": repo.get("archived", False),
+                    "status": entry.get("status"),
+                    "synced_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+            upsert=True,
+        )
+        ingested += 1
+
+    return ingested
+
+
 def run_pipeline():
     """Main embedding pipeline: reads conversations, embeds, stores in MongoDB."""
     if not CONVERSATIONS_DIR.exists():
@@ -67,7 +297,14 @@ def run_pipeline():
 
     voyage = get_voyage_client()
 
-    stats = {"conversations_embedded": 0, "messages_embedded": 0, "skipped": 0}
+    stats = {
+        "conversations_embedded": 0,
+        "messages_embedded": 0,
+        "skipped": 0,
+        "published_artifacts": 0,
+        "code_sessions": 0,
+        "code_repos": 0,
+    }
 
     for i, filepath in enumerate(conversation_files):
         conv = _load_conversation(filepath)
@@ -189,12 +426,25 @@ def run_pipeline():
 
         print(f"  {progress} Embedded: {conv_name} ({len(msg_texts)} msgs)")
 
+    # Embed published artifacts, code sessions, and ingest code repos
+    print("\nProcessing published artifacts...")
+    stats["published_artifacts"] = _embed_published_artifacts(db, voyage)
+
+    print("Processing Claude Code sessions...")
+    stats["code_sessions"] = _embed_code_sessions(db, voyage)
+
+    print("Ingesting code repos...")
+    stats["code_repos"] = _ingest_code_repos(db)
+
     emit_event(
         "memory.pipeline.completed",
         {
             "conversations_embedded": stats["conversations_embedded"],
             "messages_embedded": stats["messages_embedded"],
             "skipped": stats["skipped"],
+            "published_artifacts": stats["published_artifacts"],
+            "code_sessions": stats["code_sessions"],
+            "code_repos": stats["code_repos"],
         },
         db=db,
     )
@@ -203,6 +453,9 @@ def run_pipeline():
     print(f"  Conversations embedded: {stats['conversations_embedded']}")
     print(f"  Messages embedded:      {stats['messages_embedded']}")
     print(f"  Skipped (unchanged):    {stats['skipped']}")
+    print(f"  Published artifacts:    {stats['published_artifacts']}")
+    print(f"  Code sessions:          {stats['code_sessions']}")
+    print(f"  Code repos:             {stats['code_repos']}")
 
 
 if __name__ == "__main__":

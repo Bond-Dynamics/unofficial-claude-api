@@ -2,6 +2,9 @@
 
 Forge OS Layer 1: MEMORY — 15-function memory system with typed content,
 pattern learning, execution context, scratchpad, and archival.
+
+Forge OS Layer 2: GRAPH — UUIDv8 deterministic identity for conversations,
+threads, decisions, and lineage edges.
 """
 
 from vectordb.archive import archive_retrieve, archive_store, forget
@@ -14,6 +17,20 @@ from vectordb.scratchpad import (
     scratchpad_get,
     scratchpad_list,
     scratchpad_set,
+)
+from vectordb.uuidv8 import (
+    BASE_UUID,
+    composite_pair,
+    compression_tag_id,
+    conversation_id,
+    decision_id,
+    lineage_id,
+    parent_child,
+    project_id,
+    thread_id,
+    v5,
+    v8,
+    v8_from_string,
 )
 from vectordb.vector_store import vector_search, vector_store
 
@@ -40,4 +57,17 @@ __all__ = [
     "forget",
     # Events
     "emit_event",
+    # UUIDv8 identity system
+    "BASE_UUID",
+    "v5",
+    "v8",
+    "v8_from_string",
+    "composite_pair",
+    "parent_child",
+    "project_id",
+    "conversation_id",
+    "thread_id",
+    "decision_id",
+    "lineage_id",
+    "compression_tag_id",
 ]

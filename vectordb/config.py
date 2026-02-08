@@ -30,6 +30,11 @@ COLLECTION_SCRATCHPAD = "scratchpad"
 COLLECTION_ARCHIVE = "archive"
 COLLECTION_EVENTS = "memory_events"
 
+# Forge OS Layer 0: extended data collections
+COLLECTION_PUBLISHED_ARTIFACTS = "published_artifacts"
+COLLECTION_CODE_SESSIONS = "code_sessions"
+COLLECTION_CODE_REPOS = "code_repos"
+
 VECTOR_INDEX_NAME = "vector_index"
 
 # Content type classification constants

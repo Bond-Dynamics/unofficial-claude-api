@@ -98,8 +98,8 @@ def read_cookies_from_firefox(profile_dir):
     return "; ".join(f"{name}={value}" for name, value in cookies)
 
 
-def make_headers(cookie):
-    return {
+def make_headers(cookie, extra=None):
+    headers = {
         "Accept": "application/json",
         "Accept-Language": "en-US,en;q=0.5",
         "Accept-Encoding": "gzip, deflate, br",
@@ -112,18 +112,41 @@ def make_headers(cookie):
         "Sec-Fetch-Site": "same-origin",
         "User-Agent": USER_AGENT,
     }
+    if extra:
+        headers.update(extra)
+    return headers
 
 
-def api_get(path, cookie):
+def api_get(path, cookie, extra_headers=None):
     url = f"{BASE_URL}{path}"
-    headers = make_headers(cookie)
-    response = http_get(
-        url, headers=headers, timeout=60, impersonate="chrome110"
-    )
+    headers = make_headers(cookie, extra=extra_headers)
+    try:
+        response = http_get(
+            url, headers=headers, timeout=60, impersonate="chrome110"
+        )
+    except Exception as err:
+        print(f"  Request error for {path}: {err}")
+        return None
     if response.status_code != 200:
         print(f"  Request failed: {response.status_code} for {path}")
         return None
-    return response.json()
+    try:
+        return response.json()
+    except (ValueError, TypeError) as err:
+        print(f"  Invalid JSON from {path}: {err}")
+        return None
+
+
+def api_get_v1(path, cookie, org_id):
+    """GET request to the /v1/ API namespace (Claude Code sessions)."""
+    return api_get(
+        path,
+        cookie,
+        extra_headers={
+            "x-organization-uuid": org_id,
+            "anthropic-version": "2023-06-01",
+        },
+    )
 
 
 def format_date(date_str):
@@ -428,6 +451,80 @@ def main():
         # Rate limiting — be polite
         time.sleep(0.3)
 
+    # --- Fetch published artifacts ---
+    print("\nFetching published artifacts...")
+    published_dir = DATA_DIR / "published_artifacts"
+    published_dir.mkdir(exist_ok=True)
+    published_artifacts = api_get(
+        f"/api/organizations/{org_id}/published_artifacts", cookie
+    )
+    total_published = 0
+    if published_artifacts:
+        for artifact in published_artifacts:
+            artifact_uuid = artifact.get("published_artifact_uuid", "")
+            if not artifact_uuid:
+                continue
+            artifact_file = published_dir / f"{artifact_uuid}.json"
+            artifact_file.write_text(
+                json.dumps(artifact, indent=2, ensure_ascii=False)
+            )
+            total_published += 1
+        print(f"  Saved {total_published} published artifacts")
+    else:
+        print("  No published artifacts found (or endpoint unavailable)")
+
+    # --- Fetch Claude Code sessions ---
+    print("\nFetching Claude Code sessions...")
+    sessions_dir = DATA_DIR / "code_sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    code_sessions = api_get(
+        f"/api/organizations/{org_id}/code/sessions", cookie
+    )
+    total_sessions = 0
+    if code_sessions:
+        session_list = code_sessions if isinstance(code_sessions, list) else code_sessions.get("sessions", code_sessions.get("data", []))
+        for session in session_list:
+            session_id = session.get("id") or session.get("uuid", "")
+            if not session_id:
+                continue
+
+            # Check if already fetched and unchanged
+            session_file = sessions_dir / f"{session_id}.json"
+            if session_file.exists():
+                existing = json.loads(session_file.read_text())
+                if existing.get("updated_at") == session.get("updated_at"):
+                    total_sessions += 1
+                    continue
+
+            session_file.write_text(
+                json.dumps(session, indent=2, ensure_ascii=False)
+            )
+            total_sessions += 1
+
+        print(f"  Saved {total_sessions} Claude Code sessions")
+    else:
+        print("  No Claude Code sessions found (or endpoint unavailable)")
+
+    # --- Fetch code repos ---
+    print("\nFetching connected code repos...")
+    repos_file = DATA_DIR / "code_repos.json"
+    code_repos = api_get(
+        f"/api/organizations/{org_id}/code/repos?skip_status=true", cookie
+    )
+    total_repos = 0
+    if code_repos:
+        repo_list = code_repos if isinstance(code_repos, list) else code_repos.get("repos", [])
+        repos_file.write_text(
+            json.dumps(repo_list, indent=2, ensure_ascii=False)
+        )
+        total_repos = len(repo_list)
+        print(f"  Saved {total_repos} connected repos")
+    else:
+        print("  No code repos found (or endpoint unavailable)")
+
+    # --- Count starred conversations ---
+    total_starred = sum(1 for c in full_conversations if c.get("is_starred"))
+
     # Group by project
     grouped = {}
     for chat in full_conversations:
@@ -455,6 +552,10 @@ def main():
         "total_conversations": len(full_conversations),
         "total_projects": len(project_map),
         "total_artifacts": total_artifacts,
+        "total_starred": total_starred,
+        "total_published_artifacts": total_published,
+        "total_code_sessions": total_sessions,
+        "total_code_repos": total_repos,
         "projects": {
             name: [
                 {
@@ -465,6 +566,8 @@ def main():
                     "updated_at": c.get("updated_at"),
                     "message_count": len(c.get("chat_messages", [])),
                     "artifact_count": c.get("_artifact_count", 0),
+                    "is_starred": c.get("is_starred", False),
+                    "settings": c.get("settings", {}),
                     "project_name": name,
                 }
                 for c in chats
@@ -478,13 +581,18 @@ def main():
 
     # Summary
     print(f"\nSync complete!")
-    print(f"  Conversations: {len(full_conversations)}")
-    print(f"  Projects:      {len(project_map)}")
-    print(f"  Artifacts:     {total_artifacts}")
-    print(f"  Data dir:      {DATA_DIR}")
-    print(f"  Index:         {index_file}")
-    print(f"  Conversations: {conversations_dir}/")
-    print(f"  Artifacts:     {artifacts_dir}/")
+    print(f"  Conversations:      {len(full_conversations)} ({total_starred} starred)")
+    print(f"  Projects:           {len(project_map)}")
+    print(f"  Artifacts:          {total_artifacts}")
+    print(f"  Published:          {total_published}")
+    print(f"  Code sessions:      {total_sessions}")
+    print(f"  Code repos:         {total_repos}")
+    print(f"  Data dir:           {DATA_DIR}")
+    print(f"  Index:              {index_file}")
+    print(f"  Conversations:      {conversations_dir}/")
+    print(f"  Artifacts:          {artifacts_dir}/")
+    print(f"  Published:          {published_dir}/")
+    print(f"  Code sessions:      {sessions_dir}/")
 
     # Auto-embed if MongoDB is available
     try:
