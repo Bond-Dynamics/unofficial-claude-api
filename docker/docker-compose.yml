@@ -1,0 +1,11 @@
+services:
+  mongodb:
+    image: mongodb/mongodb-atlas-local:8
+    container_name: claude-vectordb
+    ports:
+      - "27017:27017"
+    volumes:
+      - ../data/mongodb:/data/db
+    environment:
+      - MONGODB_INITDB_DATABASE=claude_search
+    restart: unless-stopped
