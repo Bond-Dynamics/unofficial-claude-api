@@ -458,6 +458,115 @@ class ClaudeAPIClient:
             impersonate="chrome110",
         ).json()
 
+    def get_all_projects(self) -> list[dict]:
+        """
+        Retrieve a list of all projects for this organization.
+        Each project dict contains uuid, name, description, settings, and more.
+        """
+        url = (
+            f"{self.__BASE_URL}/api/organizations/"
+            f"{self.__session.organization_id}/projects"
+        )
+
+        headers = {
+            "Host": "claude.ai",
+            "User-Agent": self.__session.user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Connection": "keep-alive",
+            "Cookie": self.__session.cookie,
+        }
+
+        response = http_get(
+            url,
+            headers=headers,
+            proxies=self.__get_proxy(),
+            timeout=self.timeout,
+            impersonate="chrome110",
+        )
+        if response.status_code == 200:
+            return response.json()
+
+        return []
+
+    def get_project_data(self, project_id: str) -> dict:
+        """
+        Retrieve full project details including prompt_template (custom instructions).
+        """
+        url = (
+            f"{self.__BASE_URL}/api/organizations/"
+            f"{self.__session.organization_id}/projects/{project_id}"
+        )
+
+        headers = {
+            "Host": "claude.ai",
+            "User-Agent": self.__session.user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Connection": "keep-alive",
+            "Cookie": self.__session.cookie,
+        }
+
+        return http_get(
+            url,
+            headers=headers,
+            proxies=self.__get_proxy(),
+            timeout=self.timeout,
+            impersonate="chrome110",
+        ).json()
+
+    def get_project_docs(self, project_id: str) -> list[dict]:
+        """
+        Retrieve all knowledge documents attached to a project.
+        Each doc contains uuid, file_name, content, and metadata.
+        """
+        url = (
+            f"{self.__BASE_URL}/api/organizations/"
+            f"{self.__session.organization_id}/projects/{project_id}/docs"
+        )
+
+        headers = {
+            "Host": "claude.ai",
+            "User-Agent": self.__session.user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Connection": "keep-alive",
+            "Cookie": self.__session.cookie,
+        }
+
+        response = http_get(
+            url,
+            headers=headers,
+            proxies=self.__get_proxy(),
+            timeout=self.timeout,
+            impersonate="chrome110",
+        )
+        if response.status_code == 200:
+            return response.json()
+
+        return []
+
     def delete_all_chats(self) -> bool:
         """
         Deleted all chats associated with this session
