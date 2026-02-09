@@ -35,6 +35,27 @@ COLLECTION_PUBLISHED_ARTIFACTS = "published_artifacts"
 COLLECTION_CODE_SESSIONS = "code_sessions"
 COLLECTION_CODE_REPOS = "code_repos"
 
+# Forge OS Layer 2: GRAPH collections
+COLLECTION_THREAD_REGISTRY = "thread_registry"
+COLLECTION_DECISION_REGISTRY = "decision_registry"
+COLLECTION_LINEAGE_EDGES = "lineage_edges"
+COLLECTION_COMPRESSION_REGISTRY = "compression_registry"
+
+# Forge OS Layer 2: GRAPH — identity registry
+COLLECTION_CONVERSATION_REGISTRY = "conversation_registry"
+
+# Forge OS Layer 2.5: EXPEDITION collections
+COLLECTION_PRIMING_REGISTRY = "priming_registry"
+COLLECTION_EXPEDITION_FLAGS = "expedition_flags"
+
+# Priming block similarity threshold for territory matching
+PRIMING_TERRITORY_MATCH_THRESHOLD = 0.7
+
+# Conflict detection thresholds
+DECISION_CONFLICT_SIMILARITY_THRESHOLD = 0.85
+STALE_MAX_HOPS = 3
+STALE_MAX_DAYS = 30
+
 VECTOR_INDEX_NAME = "vector_index"
 
 # Content type classification constants

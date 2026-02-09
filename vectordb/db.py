@@ -6,12 +6,19 @@ from vectordb.config import (
     COLLECTION_CODE_REPOS,
     COLLECTION_CODE_SESSIONS,
     COLLECTION_CONVERSATIONS,
+    COLLECTION_COMPRESSION_REGISTRY,
+    COLLECTION_CONVERSATION_REGISTRY,
+    COLLECTION_DECISION_REGISTRY,
     COLLECTION_DOCUMENTS,
     COLLECTION_EVENTS,
+    COLLECTION_EXPEDITION_FLAGS,
+    COLLECTION_LINEAGE_EDGES,
     COLLECTION_MESSAGES,
     COLLECTION_PATTERNS,
+    COLLECTION_PRIMING_REGISTRY,
     COLLECTION_PUBLISHED_ARTIFACTS,
     COLLECTION_SCRATCHPAD,
+    COLLECTION_THREAD_REGISTRY,
     DATABASE_NAME,
     EMBEDDING_DIMENSIONS,
     EVENTS_TTL_SECONDS,
@@ -238,6 +245,67 @@ def ensure_forge_indexes(db=None):
     code_repos.create_index("full_name", unique=True)
     code_repos.create_index("owner")
 
+    # --- Thread registry collection ---
+    thread_registry = db[COLLECTION_THREAD_REGISTRY]
+    thread_registry.create_index("uuid", unique=True)
+    thread_registry.create_index([("project", 1), ("status", 1)])
+    thread_registry.create_index([("status", 1), ("updated_at", 1)])
+
+    # --- Decision registry collection ---
+    decision_registry = db[COLLECTION_DECISION_REGISTRY]
+    decision_registry.create_index("uuid", unique=True)
+    decision_registry.create_index([("project", 1), ("status", 1)])
+    decision_registry.create_index("text_hash")
+    decision_registry.create_index([("status", 1), ("last_validated", 1)])
+    _create_filtered_vector_index(
+        decision_registry,
+        VECTOR_INDEX_NAME,
+        filter_fields=["project", "status"],
+    )
+
+    # --- Conversation registry collection ---
+    conversation_registry = db[COLLECTION_CONVERSATION_REGISTRY]
+    conversation_registry.create_index("uuid", unique=True)
+    conversation_registry.create_index("source_id", unique=True)
+    conversation_registry.create_index("project_name")
+    conversation_registry.create_index("project_uuid")
+    conversation_registry.create_index("created_at_ms")
+
+    # --- Lineage edges collection ---
+    lineage_edges = db[COLLECTION_LINEAGE_EDGES]
+    lineage_edges.create_index("edge_uuid", unique=True)
+    lineage_edges.create_index("source_conversation")
+    lineage_edges.create_index("target_conversation")
+    lineage_edges.create_index("compression_tag")
+    lineage_edges.create_index("source_project")
+    lineage_edges.create_index("target_project")
+
+    # --- Compression registry collection ---
+    compression_registry = db[COLLECTION_COMPRESSION_REGISTRY]
+    compression_registry.create_index("compression_tag", unique=True)
+    compression_registry.create_index("project")
+    compression_registry.create_index("source_conversation")
+    compression_registry.create_index("created_at")
+
+    # --- Priming registry collection ---
+    priming_registry = db[COLLECTION_PRIMING_REGISTRY]
+    priming_registry.create_index("uuid", unique=True)
+    priming_registry.create_index([("project", 1), ("status", 1)])
+    priming_registry.create_index("territory_name")
+    priming_registry.create_index("content_hash")
+    _create_filtered_vector_index(
+        priming_registry,
+        VECTOR_INDEX_NAME,
+        filter_fields=["project", "status"],
+    )
+
+    # --- Expedition flags collection ---
+    expedition_flags = db[COLLECTION_EXPEDITION_FLAGS]
+    expedition_flags.create_index("uuid", unique=True)
+    expedition_flags.create_index([("project", 1), ("status", 1)])
+    expedition_flags.create_index([("project", 1), ("category", 1)])
+    expedition_flags.create_index("conversation_id")
+
     return {
         "messages": messages,
         "conversations": conversations,
@@ -249,6 +317,13 @@ def ensure_forge_indexes(db=None):
         "published_artifacts": published_artifacts,
         "code_sessions": code_sessions,
         "code_repos": code_repos,
+        "conversation_registry": conversation_registry,
+        "thread_registry": thread_registry,
+        "decision_registry": decision_registry,
+        "lineage_edges": lineage_edges,
+        "compression_registry": compression_registry,
+        "priming_registry": priming_registry,
+        "expedition_flags": expedition_flags,
     }
 
 
