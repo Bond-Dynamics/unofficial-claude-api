@@ -378,15 +378,52 @@ def compile_conflicts(
     }]
 
 
+def _resolve_conversation_name(conv_id: str) -> str:
+    """Resolve a conversation UUID to a human-readable name."""
+    from vectordb.conversation_registry import get_conversation
+    conv = get_conversation(conv_id)
+    if conv:
+        return conv.get("conversation_name", conv_id[:8])
+    return conv_id[:12] + "..."
+
+
+def _resolve_decision_names(decision_uuids: list[str]) -> list[str]:
+    """Resolve decision UUIDs to local_id + short text."""
+    db = get_database()
+    names = []
+    for uuid in decision_uuids:
+        d = db["decision_registry"].find_one(
+            {"uuid": uuid}, {"_id": 0, "local_id": 1, "text": 1, "project": 1}
+        )
+        if d:
+            text = d.get("text", "")[:60]
+            names.append(f"{d.get('local_id', '?')} ({d.get('project', '')}): {text}")
+        else:
+            names.append(uuid[:12] + "...")
+    return names
+
+
 def compile_lineage_summary(
     internal_names: list[str],
     doc_prefix: str,
 ) -> list[dict]:
-    """Compile a lineage summary: chain counts, cross-project edges, carried/dropped."""
+    """Compile a lineage summary: chain counts, cross-project edges, carried/dropped.
+
+    Searches edges by both internal names and Claude.ai-facing names,
+    since edges may use either naming convention.
+    """
+    # Edges may use Claude.ai names (e.g. "The Nexus") or internal names
+    # (e.g. "Reality Compiler"). Search with both sets to catch all.
     all_edges = []
+    searched = set()
     for name in internal_names:
-        edges = get_full_graph(project=name)
-        all_edges.extend(edges)
+        if name not in searched:
+            searched.add(name)
+            all_edges.extend(get_full_graph(project=name))
+
+    # Also search with no filter if we have wildcard-level coverage
+    if len(internal_names) > 5:
+        all_edges.extend(get_full_graph())
 
     # Deduplicate by edge_uuid
     seen = set()
@@ -413,21 +450,43 @@ def compile_lineage_summary(
 
     lines = [f"# Lineage Summary\n"]
     lines.append(f"_Auto-synced from Forge OS. {_timestamp()}_\n")
-    lines.append(f"- **Total edges:** {len(unique_edges)}")
-    lines.append(f"- **Cross-project edges:** {len(cross_project)}")
+    lines.append(f"- **Total compression hops:** {len(unique_edges)}")
+    lines.append(f"- **Cross-project hops:** {len(cross_project)}")
     lines.append(f"- **Decisions carried forward:** {total_carried}")
     lines.append(f"- **Decisions dropped:** {total_dropped}")
     lines.append(f"- **Threads carried forward:** {total_threads_carried}")
     lines.append(f"- **Threads resolved at hop:** {total_threads_resolved}")
     lines.append("")
 
-    if cross_project:
-        lines.append("## Cross-Project Edges\n")
-        for e in cross_project:
-            src = e.get("source_project", "?")
-            tgt = e.get("target_project", "?")
-            carried = len(e.get("decisions_carried", []))
-            lines.append(f"- {src} → {tgt} ({carried} decisions carried)")
+    for i, e in enumerate(unique_edges, 1):
+        src_name = _resolve_conversation_name(e.get("source_conversation", ""))
+        tgt_name = _resolve_conversation_name(e.get("target_conversation", ""))
+        src_proj = e.get("source_project", "")
+        tgt_proj = e.get("target_project", "")
+        tag = e.get("compression_tag", "")
+        carried = e.get("decisions_carried", [])
+        dropped = e.get("decisions_dropped", [])
+
+        lines.append(f"## Hop {i}: {src_proj} → {tgt_proj}\n")
+        lines.append(f"- **From:** {src_name}")
+        lines.append(f"- **To:** {tgt_name}")
+        if tag:
+            lines.append(f"- **Compression tag:** {tag}")
+        lines.append(f"- **Decisions carried:** {len(carried)}")
+        lines.append(f"- **Decisions dropped:** {len(dropped)}")
+
+        if carried:
+            resolved = _resolve_decision_names(carried)
+            lines.append("\n**Carried forward:**")
+            for name in resolved:
+                lines.append(f"- {name}")
+
+        if dropped:
+            resolved = _resolve_decision_names(dropped)
+            lines.append("\n**Dropped:**")
+            for name in resolved:
+                lines.append(f"- {name}")
+
         lines.append("")
 
     return [{
