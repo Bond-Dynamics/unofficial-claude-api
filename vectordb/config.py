@@ -56,6 +56,11 @@ DECISION_CONFLICT_SIMILARITY_THRESHOLD = 0.85
 STALE_MAX_HOPS = 3
 STALE_MAX_DAYS = 30
 
+# Entanglement discovery thresholds
+ENTANGLEMENT_STRONG_THRESHOLD = 0.65
+ENTANGLEMENT_WEAK_THRESHOLD = 0.50
+COLLECTION_ENTANGLEMENT_SCANS = "entanglement_scans"
+
 VECTOR_INDEX_NAME = "vector_index"
 
 # Content type classification constants
@@ -95,3 +100,25 @@ RETENTION_PERMANENT = "permanent"
 
 # Events TTL — 90 days in seconds
 EVENTS_TTL_SECONDS = 90 * 24 * 60 * 60
+
+# Attention engine configuration
+ATTENTION_WEIGHTS = {
+    "similarity": 0.45,
+    "epistemic_tier": 0.20,
+    "freshness": 0.15,
+    "conflict_salience": 0.10,
+    "category_boost": 0.10,
+}
+
+CATEGORY_BOOSTS = {
+    "decision": 1.0,
+    "thread": 0.8,
+    "priming": 0.6,
+    "pattern": 0.4,
+    "conversation": 0.2,
+    "message": 0.0,
+}
+
+ATTENTION_DEFAULT_BUDGET = 4000
+ATTENTION_FRESHNESS_HALF_LIFE = 30  # days
+ATTENTION_MIN_SCORE = 0.1

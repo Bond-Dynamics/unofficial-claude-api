@@ -8,6 +8,14 @@ threads, decisions, and lineage edges. Thread/decision registries,
 conflict detection, and lineage tracking across compression hops.
 """
 
+from vectordb.attention import (
+    alerts as attention_alerts,
+    compute_attention,
+    context_load as attention_context_load,
+    enrich_with_entanglement,
+    project_context as attention_project_context,
+    recall as attention_recall,
+)
 from vectordb.archive import archive_retrieve, archive_store, forget
 from vectordb.compression_registry import (
     compute_checksum,
@@ -17,6 +25,16 @@ from vectordb.compression_registry import (
     verify_checksum,
 )
 from vectordb.conflicts import detect_conflicts, register_conflict
+from vectordb.entanglement import (
+    ensure_thread_embeddings,
+    get_latest_scan as get_latest_entanglement_scan,
+    get_scan as get_entanglement_scan,
+    list_scans as list_entanglement_scans,
+    scan as scan_entanglement,
+    scan_and_save as scan_entanglement_and_save,
+    scan_project as scan_entanglement_project,
+    scan_project_and_save as scan_entanglement_project_and_save,
+)
 from vectordb.conversation_registry import (
     get_conversation,
     get_conversation_by_uuid,
@@ -102,6 +120,13 @@ from vectordb.sync_engine import sync_all, sync_one
 from vectordb.vector_store import vector_search, vector_store
 
 __all__ = [
+    # Attention engine
+    "attention_recall",
+    "compute_attention",
+    "attention_project_context",
+    "attention_context_load",
+    "enrich_with_entanglement",
+    "attention_alerts",
     # Vector store
     "vector_store",
     "vector_search",
@@ -186,6 +211,15 @@ __all__ = [
     "mark_flag_compiled",
     "delete_flag",
     "get_all_flags",
+    # Entanglement discovery
+    "ensure_thread_embeddings",
+    "scan_entanglement",
+    "scan_entanglement_and_save",
+    "scan_entanglement_project",
+    "scan_entanglement_project_and_save",
+    "get_latest_entanglement_scan",
+    "get_entanglement_scan",
+    "list_entanglement_scans",
     # Claude.ai API client
     "ClaudeSession",
     "ClaudeAPIError",

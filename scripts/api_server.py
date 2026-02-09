@@ -46,40 +46,13 @@ from vectordb.vector_store import vector_search
 from vectordb.claude_api import ClaudeAPIError, ClaudeSession, get_session, reset_session
 from vectordb.sync_manifest import load_manifest, resolve_all_targets, validate_manifest
 from vectordb.sync_engine import sync_all, sync_one
-
-
-# ---------------------------------------------------------------------------
-# Name resolution: conversation registry names → decision/thread/flag names
-# ---------------------------------------------------------------------------
-
-def _build_name_map() -> dict[str, list[str]]:
-    """Build a mapping from conversation-registry names to the names used in
-    decision/thread/flag registries, sourced from the sync manifest name_map.
-
-    Returns:
-        Dict mapping conv-registry name → list of internal names.
-        Names not in the map are returned as-is.
-    """
-    try:
-        manifest = load_manifest()
-        return manifest.get("name_map", {})
-    except (FileNotFoundError, ValueError):
-        return {}
-
-
-def _resolve_names(conv_name: str) -> list[str]:
-    """Resolve a conversation-registry project name to the name(s)
-    used in decision/thread/flag registries.
-
-    Falls back to returning the original name if no mapping exists.
-    """
-    name_map = _build_name_map()
-    mapped = name_map.get(conv_name)
-    if mapped is None:
-        return [conv_name]
-    if mapped == ["*"]:
-        return [conv_name]
-    return list(mapped)
+from vectordb.attention import (
+    alerts as attention_alerts,
+    context_load as attention_context_load,
+    project_context as attention_project_context,
+    recall as attention_recall,
+)
+from vectordb.scratchpad import scratchpad_list, scratchpad_set
 
 
 app = FastAPI(
@@ -124,6 +97,15 @@ def _json(data):
 @app.get("/api/stats")
 def api_stats():
     db = get_database()
+    latest_scan = db["entanglement_scans"].find_one(
+        {"project": {"$exists": False}},
+        {"_id": 0, "resonances_found": 1, "scanned_at": 1, "by_tier": 1},
+        sort=[("scanned_at", -1)],
+    )
+    entanglement_stats = {
+        "resonances": latest_scan.get("resonances_found", 0) if latest_scan else 0,
+        "last_scanned": latest_scan.get("scanned_at") if latest_scan else None,
+    }
     return _json({
         "conversations": db["conversation_registry"].count_documents({}),
         "projects": len(list_projects()),
@@ -133,6 +115,7 @@ def api_stats():
         "flags": db["expedition_flags"].count_documents({"status": "pending"}),
         "compressions": db["compression_registry"].count_documents({}),
         "priming_blocks": db["priming_registry"].count_documents({"status": "active"}),
+        "entanglement": entanglement_stats,
     })
 
 
@@ -144,19 +127,17 @@ def api_stats():
 def api_projects():
     projects = list_projects()
 
-    # Enrich with decision + thread counts per project
-    # Uses name resolution since registries may use different names
     db = get_database()
     for p in projects:
-        internal_names = _resolve_names(p["project_name"])
+        name = p["project_name"]
         p["decision_count"] = db["decision_registry"].count_documents(
-            {"project": {"$in": internal_names}, "status": "active"}
+            {"project": name, "status": "active"}
         )
         p["thread_count"] = db["thread_registry"].count_documents(
-            {"project": {"$in": internal_names}, "status": {"$ne": "resolved"}}
+            {"project": name, "status": {"$ne": "resolved"}}
         )
         p["flag_count"] = db["expedition_flags"].count_documents(
-            {"project": {"$in": internal_names}, "status": "pending"}
+            {"project": name, "status": "pending"}
         )
 
     return _json(projects)
@@ -169,39 +150,25 @@ def api_project_conversations(name: str):
 
 @app.get("/api/projects/{name}/decisions")
 def api_project_decisions(name: str):
-    results = []
-    for internal_name in _resolve_names(name):
-        results.extend(get_active_decisions(internal_name))
-    return _json(results)
+    return _json(get_active_decisions(name))
 
 
 @app.get("/api/projects/{name}/threads")
 def api_project_threads(name: str):
-    results = []
-    for internal_name in _resolve_names(name):
-        results.extend(get_active_threads(internal_name))
-    return _json(results)
+    return _json(get_active_threads(name))
 
 
 @app.get("/api/projects/{name}/stale")
 def api_project_stale(name: str):
-    all_decisions = []
-    all_threads = []
-    for internal_name in _resolve_names(name):
-        all_decisions.extend(get_stale_decisions(internal_name))
-        all_threads.extend(get_stale_threads(internal_name))
     return _json({
-        "decisions": all_decisions,
-        "threads": all_threads,
+        "decisions": get_stale_decisions(name),
+        "threads": get_stale_threads(name),
     })
 
 
 @app.get("/api/projects/{name}/flags")
 def api_project_flags(name: str):
-    results = []
-    for internal_name in _resolve_names(name):
-        results.extend(get_all_flags(internal_name))
-    return _json(results)
+    return _json(get_all_flags(name))
 
 
 @app.get("/api/projects/{name}/priming")
@@ -368,11 +335,21 @@ def api_alerts():
         {"status": "active", "conflicts_with": {"$ne": []}}
     )
 
+    latest_scan = db["entanglement_scans"].find_one(
+        {"project": {"$exists": False}},
+        {"_id": 0, "loose_ends": 1, "resonances_found": 1, "scanned_at": 1},
+        sort=[("scanned_at", -1)],
+    )
+    loose_end_count = len(latest_scan.get("loose_ends", [])) if latest_scan else 0
+    resonance_count = latest_scan.get("resonances_found", 0) if latest_scan else 0
+
     return _json({
         "stale_decisions": len(stale_decisions),
         "stale_threads": len(stale_threads),
         "conflicts": conflict_count,
         "pending_flags": total_pending_flags,
+        "entanglement_resonances": resonance_count,
+        "entanglement_loose_ends": loose_end_count,
     })
 
 
@@ -515,6 +492,102 @@ def api_claude_reset_session():
 
 
 # ---------------------------------------------------------------------------
+# Entanglement
+# ---------------------------------------------------------------------------
+
+@app.get("/api/entanglement")
+def api_entanglement():
+    """Get the latest cached entanglement scan. Returns 404 if no scan exists."""
+    from vectordb.entanglement import get_latest_scan
+    result = get_latest_scan()
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No entanglement scan found. POST /api/entanglement/scan to trigger one.",
+        )
+    return _json(result)
+
+
+@app.post("/api/entanglement/scan")
+def api_entanglement_trigger(min_similarity: Optional[float] = None):
+    """Trigger a fresh full entanglement scan, persist, and return results."""
+    from vectordb.entanglement import scan_and_save
+    result = scan_and_save(min_similarity=min_similarity)
+    return _json(result)
+
+
+@app.get("/api/entanglement/project/{name}")
+def api_entanglement_project(name: str):
+    """Get the latest cached project-scoped scan. Returns 404 if none exists."""
+    from vectordb.entanglement import get_latest_scan
+    result = get_latest_scan(project=name)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No entanglement scan found for '{name}'. "
+                   f"POST /api/entanglement/project/{name}/scan to trigger one.",
+        )
+    return _json(result)
+
+
+@app.post("/api/entanglement/project/{name}/scan")
+def api_entanglement_project_trigger(
+    name: str, min_similarity: Optional[float] = None,
+):
+    """Trigger a fresh project-scoped scan, persist, and return results."""
+    from vectordb.entanglement import scan_project_and_save
+    result = scan_project_and_save(name, min_similarity=min_similarity)
+    return _json(result)
+
+
+@app.get("/api/entanglement/clusters")
+def api_entanglement_clusters():
+    """Return just the clusters from the latest cached scan."""
+    from vectordb.entanglement import get_latest_scan
+    result = get_latest_scan()
+    if result is None:
+        return _json([])
+    return _json(result.get("clusters", []))
+
+
+@app.get("/api/entanglement/bridges")
+def api_entanglement_bridges():
+    """Return just the lineage bridges from the latest cached scan."""
+    from vectordb.entanglement import get_latest_scan
+    result = get_latest_scan()
+    if result is None:
+        return _json([])
+    return _json(result.get("bridges", []))
+
+
+@app.get("/api/entanglement/loose-ends")
+def api_entanglement_loose_ends():
+    """Return just the loose ends from the latest cached scan."""
+    from vectordb.entanglement import get_latest_scan
+    result = get_latest_scan()
+    if result is None:
+        return _json([])
+    return _json(result.get("loose_ends", []))
+
+
+@app.get("/api/entanglement/scans")
+def api_entanglement_scan_history(limit: int = Query(20, ge=1, le=100)):
+    """List recent scan summaries."""
+    from vectordb.entanglement import list_scans
+    return _json(list_scans(limit=limit))
+
+
+@app.get("/api/entanglement/scans/{scan_id}")
+def api_entanglement_scan_detail(scan_id: str):
+    """Retrieve a specific historical scan by ID."""
+    from vectordb.entanglement import get_scan
+    result = get_scan(scan_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return _json(result)
+
+
+# ---------------------------------------------------------------------------
 # Manifest Sync
 # ---------------------------------------------------------------------------
 
@@ -572,6 +645,382 @@ def api_sync_validate(manifest: Optional[str] = None):
         })
     except (FileNotFoundError, ValueError) as err:
         raise HTTPException(status_code=400, detail=str(err))
+
+
+# ---------------------------------------------------------------------------
+# Forge OS Semantic Memory Interface (LLM-facing endpoints)
+# ---------------------------------------------------------------------------
+
+class ForgeRecallBody(BaseModel):
+    query: str
+    project: Optional[str] = None
+    budget: Optional[int] = None
+
+
+class ForgeProjectBody(BaseModel):
+    project: str
+    sections: Optional[list[str]] = None
+
+
+class ForgeContextLoadBody(BaseModel):
+    project: str
+    query: Optional[str] = None
+    budget: Optional[int] = None
+
+
+class ForgeEntanglementBody(BaseModel):
+    query: Optional[str] = None
+    project: Optional[str] = None
+
+
+class ForgeTraceBody(BaseModel):
+    conversation_id: str
+
+
+class ForgeSearchBody(BaseModel):
+    query: str
+    scope: Optional[str] = "conversations"
+    limit: Optional[int] = 10
+
+
+class ForgeDecideBody(BaseModel):
+    text: str
+    project: str
+    local_id: str
+    tier: Optional[float] = None
+    rationale: Optional[str] = None
+
+
+class ForgeThreadBody(BaseModel):
+    title: str
+    project: str
+    local_id: str
+    status: Optional[str] = "open"
+    priority: Optional[str] = "medium"
+    resolution: Optional[str] = None
+
+
+class ForgeFlagBody(BaseModel):
+    description: str
+    project: str
+    category: Optional[str] = None
+    context: Optional[str] = None
+
+
+class ForgePatternBody(BaseModel):
+    content: str
+    pattern_type: str
+    success_score: float
+
+
+class ForgeRememberBody(BaseModel):
+    key: str
+    value: str
+    session_id: Optional[str] = None
+
+
+class ForgeSessionBody(BaseModel):
+    session_id: Optional[str] = None
+
+
+@app.post("/api/forge/recall")
+def api_forge_recall(body: ForgeRecallBody):
+    result = attention_recall(
+        query=body.query,
+        project=body.project,
+        budget=body.budget,
+    )
+    return _json(result)
+
+
+@app.post("/api/forge/project")
+def api_forge_project(body: ForgeProjectBody):
+    result = attention_project_context(
+        project=body.project,
+        sections=body.sections,
+    )
+    return _json(result)
+
+
+@app.post("/api/forge/context-load")
+def api_forge_context_load(body: ForgeContextLoadBody):
+    result = attention_context_load(
+        project=body.project,
+        query=body.query,
+        budget=body.budget,
+    )
+    return _json(result)
+
+
+@app.post("/api/forge/entanglement")
+def api_forge_entanglement(body: ForgeEntanglementBody):
+    from vectordb.entanglement import get_latest_scan as _get_latest_scan
+
+    scan = _get_latest_scan(project=body.project)
+    if scan is None:
+        return _json({
+            "clusters": [],
+            "bridges": [],
+            "loose_ends": [],
+            "note": "No entanglement scan cached.",
+        })
+
+    if body.query:
+        query_lower = body.query.lower()
+        filtered_clusters = [
+            c for c in scan.get("clusters", [])
+            if any(
+                query_lower in (item.get("text", "").lower())
+                for item in c.get("items", [])
+            )
+        ]
+        scan = {**scan, "clusters": filtered_clusters}
+
+    return _json(scan)
+
+
+@app.post("/api/forge/trace")
+def api_forge_trace(body: ForgeTraceBody):
+    conv = resolve_id(body.conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    trace = trace_conversation(conv["uuid"])
+    trace["conversation"] = conv
+    return _json(trace)
+
+
+@app.get("/api/forge/alerts")
+def api_forge_alerts():
+    result = attention_alerts()
+    return _json(result)
+
+
+@app.post("/api/forge/search")
+def api_forge_search(body: ForgeSearchBody):
+    scope_map = {
+        "conversations": COLLECTION_CONVERSATIONS,
+        "messages": COLLECTION_MESSAGES,
+        "decisions": COLLECTION_DECISION_REGISTRY,
+        "patterns": COLLECTION_PATTERNS,
+    }
+
+    collection_name = scope_map.get(body.scope)
+    if collection_name is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid scope '{body.scope}'. Use: {', '.join(scope_map.keys())}",
+        )
+
+    search_limit = min(body.limit or 10, 50)
+    results = vector_search(
+        query=body.query,
+        collection_name=collection_name,
+        limit=search_limit,
+    )
+    return _json(results)
+
+
+@app.post("/api/forge/decide")
+def api_forge_decide(body: ForgeDecideBody):
+    from vectordb.decision_registry import upsert_decision
+    from vectordb.events import emit_event as _emit_event
+
+    projects = list_projects()
+    project_info = next(
+        (p for p in projects if p["project_name"] == body.project), None
+    )
+    if project_info is None:
+        raise HTTPException(status_code=404, detail=f"Project not found: {body.project}")
+
+    import uuid as uuid_mod
+    project_uuid = uuid_mod.UUID(project_info["project_uuid"])
+
+    conversations = list_project_conversations(body.project)
+    conv_id = uuid_mod.UUID(int=0)
+    if conversations:
+        conv_id = uuid_mod.UUID(conversations[0].get("uuid", str(uuid_mod.UUID(int=0))))
+
+    result = upsert_decision(
+        local_id=body.local_id,
+        text=body.text,
+        project=body.project,
+        project_uuid=project_uuid,
+        originated_conversation_id=conv_id,
+        epistemic_tier=body.tier,
+        rationale=body.rationale,
+    )
+
+    _emit_event("forge.api.decide", {
+        "uuid": result.get("uuid"),
+        "project": body.project,
+        "local_id": body.local_id,
+    })
+
+    return _json(result)
+
+
+@app.post("/api/forge/thread")
+def api_forge_thread(body: ForgeThreadBody):
+    from vectordb.thread_registry import resolve_thread as _resolve_thread
+    from vectordb.thread_registry import upsert_thread
+    from vectordb.events import emit_event as _emit_event
+
+    projects = list_projects()
+    project_info = next(
+        (p for p in projects if p["project_name"] == body.project), None
+    )
+    if project_info is None:
+        raise HTTPException(status_code=404, detail=f"Project not found: {body.project}")
+
+    import uuid as uuid_mod
+    project_uuid = uuid_mod.UUID(project_info["project_uuid"])
+
+    conversations = list_project_conversations(body.project)
+    conv_id = uuid_mod.UUID(int=0)
+    if conversations:
+        conv_id = uuid_mod.UUID(conversations[0].get("uuid", str(uuid_mod.UUID(int=0))))
+
+    result = upsert_thread(
+        local_id=body.local_id,
+        title=body.title,
+        project=body.project,
+        project_uuid=project_uuid,
+        first_seen_conversation_id=conv_id,
+        status=body.status or "open",
+        priority=body.priority or "medium",
+        resolution=body.resolution,
+    )
+
+    if body.status == "resolved" and body.resolution and result.get("uuid"):
+        _resolve_thread(result["uuid"], body.resolution)
+        result["action"] = "resolved"
+
+    _emit_event("forge.api.thread", {
+        "uuid": result.get("uuid"),
+        "project": body.project,
+        "local_id": body.local_id,
+    })
+
+    return _json(result)
+
+
+@app.post("/api/forge/flag")
+def api_forge_flag(body: ForgeFlagBody):
+    from vectordb.expedition_flags import plant_flag
+    from vectordb.events import emit_event as _emit_event
+
+    projects = list_projects()
+    project_info = next(
+        (p for p in projects if p["project_name"] == body.project), None
+    )
+    if project_info is None:
+        raise HTTPException(status_code=404, detail=f"Project not found: {body.project}")
+
+    import uuid as uuid_mod
+    project_uuid = uuid_mod.UUID(project_info["project_uuid"])
+
+    conversations = list_project_conversations(body.project)
+    conv_id = str(uuid_mod.UUID(int=0))
+    if conversations:
+        conv_id = conversations[0].get("uuid", conv_id)
+
+    result = plant_flag(
+        description=body.description,
+        project=body.project,
+        project_uuid=project_uuid,
+        conversation_id=conv_id,
+        category=body.category,
+        context=body.context,
+    )
+
+    _emit_event("forge.api.flag", {
+        "uuid": result.get("uuid"),
+        "project": body.project,
+    })
+
+    return _json(result)
+
+
+@app.post("/api/forge/pattern")
+def api_forge_pattern(body: ForgePatternBody):
+    from vectordb.patterns import pattern_store
+
+    result = pattern_store(
+        content=body.content,
+        pattern_type=body.pattern_type,
+        success_score=body.success_score,
+    )
+    return _json(result)
+
+
+@app.post("/api/forge/remember")
+def api_forge_remember(body: ForgeRememberBody):
+    session_id = body.session_id or "forge-api-default"
+    scratchpad_set(session_id, body.key, body.value)
+    return _json({
+        "action": "stored",
+        "key": body.key,
+        "session_id": session_id,
+    })
+
+
+@app.post("/api/forge/session")
+def api_forge_session(body: ForgeSessionBody):
+    session_id = body.session_id or "forge-api-default"
+    entries = scratchpad_list(session_id)
+    return _json({
+        "session_id": session_id,
+        "entries": entries,
+        "count": len(entries),
+    })
+
+
+@app.get("/api/forge/stats")
+def api_forge_stats():
+    db = get_database()
+    latest_scan = db["entanglement_scans"].find_one(
+        {"project": {"$exists": False}},
+        {"_id": 0, "resonances_found": 1, "scanned_at": 1, "by_tier": 1},
+        sort=[("scanned_at", -1)],
+    )
+    entanglement_stats = {
+        "resonances": latest_scan.get("resonances_found", 0) if latest_scan else 0,
+        "last_scanned": latest_scan.get("scanned_at") if latest_scan else None,
+    }
+
+    return _json({
+        "conversations": db["conversation_registry"].count_documents({}),
+        "projects": len(list_projects()),
+        "decisions": db["decision_registry"].count_documents({"status": "active"}),
+        "threads": db["thread_registry"].count_documents({"status": {"$ne": "resolved"}}),
+        "edges": db["lineage_edges"].count_documents({}),
+        "flags": db["expedition_flags"].count_documents({"status": "pending"}),
+        "compressions": db["compression_registry"].count_documents({}),
+        "priming_blocks": db["priming_registry"].count_documents({"status": "active"}),
+        "patterns": db["patterns"].count_documents({}),
+        "entanglement": entanglement_stats,
+    })
+
+
+@app.get("/api/forge/projects")
+def api_forge_projects():
+    db = get_database()
+    projects = list_projects(db=db)
+
+    for p in projects:
+        name = p["project_name"]
+        p["decision_count"] = db["decision_registry"].count_documents(
+            {"project": name, "status": "active"}
+        )
+        p["thread_count"] = db["thread_registry"].count_documents(
+            {"project": name, "status": {"$ne": "resolved"}}
+        )
+        p["flag_count"] = db["expedition_flags"].count_documents(
+            {"project": name, "status": "pending"}
+        )
+
+    return _json(projects)
 
 
 # ---------------------------------------------------------------------------
