@@ -1,0 +1,109 @@
+version: "1"
+
+# Claude.ai project name → Forge OS internal project name(s)
+# Used to bridge naming differences between Claude.ai and MongoDB
+name_map:
+  "The Reality Compiler": ["Reality Compiler"]
+  "Wavelength": ["Wavelength AI"]
+  "The Nexus": ["*"]
+  "Applied Alchemy — Sovereignty Architect": ["Consciousness Physics", "Attention Framework"]
+  "The Transmutation Forge for Prompt Engineering": ["*"]
+  "Systems Architect": ["Forge OS"]
+
+defaults:
+  data_types: [decisions, threads, flags]
+  filters:
+    min_tier: null
+    max_hops: null
+    decisions_status: "active"
+    threads_status: "!resolved"
+    flags_status: "pending"
+  doc_prefix: "forge"
+  merge: false
+
+targets:
+  # -----------------------------------------------------------------------
+  # Cross-project hubs (merged mode)
+  # -----------------------------------------------------------------------
+
+  # The Nexus — master hub, gets everything merged (no tier filter)
+  "019bc294-25a6-7091-8e6a-f8d3d96a984a":
+    name: "The Nexus"
+    data_types: [decisions, threads, conflicts, flags, lineage_summary]
+    merge: true
+
+  # Transmutation Forge — all projects merged (mirrors Nexus)
+  "019bada7-4d10-7120-9ce5-c0501327419c":
+    name: "The Transmutation Forge for Prompt Engineering"
+    data_types: [decisions, threads, conflicts, flags, lineage_summary]
+    merge: true
+
+  # -----------------------------------------------------------------------
+  # Domain projects (self-sync + cross-project sources)
+  # -----------------------------------------------------------------------
+
+  # The Reality Compiler — own + Attention Framework
+  "019ba882-8b2c-72e0-a697-0cfac00a6331":
+    name: "The Reality Compiler"
+    additional_sources: ["Attention Framework"]
+
+  # Wavelength — own + Attention Framework (high-confidence only)
+  "019aac4c-5591-7119-8ddf-c78992ffdbf4":
+    name: "Wavelength"
+    additional_sources: ["Attention Framework"]
+    filters:
+      min_tier: 0.7
+
+  # Applied Alchemy — Consciousness Physics + Attention Framework
+  "019be66a-7f0b-70ec-ab1a-2b77135bb796":
+    name: "Applied Alchemy — Sovereignty Architect"
+
+  # Systems Architect — Forge OS internals
+  "019b5f91-7b8f-77bc-9fa4-e406fa6fe404":
+    name: "Systems Architect"
+
+  # Polarity Architecture Lab — cross-project inversion patterns
+  "019c4407-bf34-77e5-a840-aa2b914317af":
+    name: "Polarity Architecture Lab"
+
+  # The Cartographer's Codex — expedition findings
+  "019aeb62-d622-75e6-973b-0acb9d032f2c":
+    name: "The Cartographer's Codex"
+
+  # -----------------------------------------------------------------------
+  # Business / other (enabled, self-sync defaults)
+  # -----------------------------------------------------------------------
+
+  "019a7dc8-765c-77a0-a938-2476e5ea4fda":
+    name: "Bond Dynamics LLC"
+
+  "0199e382-f053-71fc-a219-5d71f532a000":
+    name: "Entangled Ones Inc."
+
+  # -----------------------------------------------------------------------
+  # Disabled (personal / utility)
+  # -----------------------------------------------------------------------
+
+  "0199022c-5d35-71cf-9661-c3f929c99711":
+    name: "Therapy"
+    enabled: false
+
+  "0198e734-b2f2-71db-86bc-f9392dd5009b":
+    name: "Cheeky"
+    enabled: false
+
+  "01989a0d-516d-7784-a9c5-e90da1b029e4":
+    name: "How to use Claude"
+    enabled: false
+
+  "01991060-1098-70de-963f-b2358385bb8d":
+    name: "Levi Support"
+    enabled: false
+
+  "0199abb4-2de1-72b3-8fac-d9ead24cb073":
+    name: "Cloud Certification Prep"
+    enabled: false
+
+  "0199aac9-2205-7598-9f57-7744f8449420":
+    name: "Interview Preparation"
+    enabled: false

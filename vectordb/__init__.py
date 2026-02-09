@@ -87,6 +87,18 @@ from vectordb.uuidv8 import (
     v8,
     v8_from_string,
 )
+from vectordb.claude_api import (
+    ClaudeAPIError,
+    ClaudeSession,
+    get_session,
+    reset_session,
+)
+from vectordb.sync_manifest import (
+    load_manifest,
+    resolve_all_targets,
+    validate_manifest,
+)
+from vectordb.sync_engine import sync_all, sync_one
 from vectordb.vector_store import vector_search, vector_store
 
 __all__ = [
@@ -174,4 +186,15 @@ __all__ = [
     "mark_flag_compiled",
     "delete_flag",
     "get_all_flags",
+    # Claude.ai API client
+    "ClaudeSession",
+    "ClaudeAPIError",
+    "get_session",
+    "reset_session",
+    # Sync manifest
+    "load_manifest",
+    "resolve_all_targets",
+    "validate_manifest",
+    "sync_all",
+    "sync_one",
 ]

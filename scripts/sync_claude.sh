@@ -32,15 +32,24 @@ PG_BACKUP_ENABLED="${CLAUDE_SYNC_PG_BACKUP:-false}"
 
 mkdir -p "$PROJECT_DIR/data"
 
+# Parse --full flag: forces complete re-fetch, re-embed, re-register, re-link
+FORCE_FLAG=""
+if [ "$1" = "--full" ]; then
+    FORCE_FLAG="--force"
+fi
+
 # Redirect all stdout/stderr to log file for the rest of the script.
 # osascript talks to the window server directly, unaffected by this.
 exec >> "$LOG_FILE" 2>&1
 
 echo "===== Sync started: $(date) ====="
+if [ -n "$FORCE_FLAG" ]; then
+    echo "FULL SYNC: re-fetching and re-embedding everything"
+fi
 
 # --- Step 1: Fetch conversations from Claude.ai ---
 echo "Fetching conversations..."
-$PYTHON "$PROJECT_DIR/examples/fetch_conversations.py"
+$PYTHON "$PROJECT_DIR/examples/fetch_conversations.py" $FORCE_FLAG
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then
@@ -56,8 +65,20 @@ echo "Fetch completed successfully"
 # --- Step 2: Run embedding pipeline if local MongoDB is available ---
 if docker exec "$MONGO_CONTAINER" mongosh --quiet --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then
     echo "Running embedding pipeline..."
-    $PYTHON -m vectordb.pipeline
+    $PYTHON -m vectordb.pipeline $FORCE_FLAG
     echo "Embedding pipeline finished"
+
+    # --- Step 2b: Register conversations and backfill lineage ---
+    echo "Registering conversations in identity registry..."
+    $PYTHON "$PROJECT_DIR/scripts/register_conversations.py"
+    echo "Registration finished"
+
+    # --- Step 2c: Manifest-driven sync to Claude.ai projects ---
+    if [ -f "$PROJECT_DIR/config/sync_manifest.yaml" ]; then
+        echo "Running manifest sync to Claude.ai projects..."
+        $PYTHON "$PROJECT_DIR/scripts/run_sync.py"
+        echo "Manifest sync finished"
+    fi
 else
     echo "Local MongoDB not running, skipping embedding"
 fi
@@ -95,13 +116,11 @@ if [ "$GCP_PUSH_ENABLED" = "true" ]; then
             ARCHIVE="$DUMP_DIR/claude_search_$(date +%Y%m%d).tar.gz"
             tar -czf "$ARCHIVE" -C "$DUMP_DIR" "$MONGO_DB"
 
-            gcloud compute scp --compress --zone="$GCE_ZONE" \
+            if gcloud compute scp --compress --zone="$GCE_ZONE" \
                 "$ARCHIVE" \
-                "$GCE_INSTANCE:/tmp/mongodump.tar.gz"
-
-            if [ $? -eq 0 ]; then
+                "$GCE_INSTANCE:/tmp/mongodump.tar.gz"; then
                 # Extract on GCE, copy into container, restore
-                gcloud compute ssh "$GCE_INSTANCE" --zone="$GCE_ZONE" --command="
+                if gcloud compute ssh "$GCE_INSTANCE" --zone="$GCE_ZONE" --command="
                     set -e
                     cd /tmp
                     tar -xzf mongodump.tar.gz
@@ -114,9 +133,7 @@ if [ "$GCP_PUSH_ENABLED" = "true" ]; then
                     docker exec $GCE_MONGO_CONTAINER rm -rf /tmp/$MONGO_DB
                     rm -rf /tmp/$MONGO_DB /tmp/mongodump.tar.gz
                     echo 'MongoDB restore completed'
-                "
-
-                if [ $? -eq 0 ]; then
+                "; then
                     echo "GCE MongoDB restore successful"
                 else
                     echo "GCE MongoDB restore failed"
