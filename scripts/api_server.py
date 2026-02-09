@@ -48,6 +48,40 @@ from vectordb.sync_manifest import load_manifest, resolve_all_targets, validate_
 from vectordb.sync_engine import sync_all, sync_one
 
 
+# ---------------------------------------------------------------------------
+# Name resolution: conversation registry names → decision/thread/flag names
+# ---------------------------------------------------------------------------
+
+def _build_name_map() -> dict[str, list[str]]:
+    """Build a mapping from conversation-registry names to the names used in
+    decision/thread/flag registries, sourced from the sync manifest name_map.
+
+    Returns:
+        Dict mapping conv-registry name → list of internal names.
+        Names not in the map are returned as-is.
+    """
+    try:
+        manifest = load_manifest()
+        return manifest.get("name_map", {})
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def _resolve_names(conv_name: str) -> list[str]:
+    """Resolve a conversation-registry project name to the name(s)
+    used in decision/thread/flag registries.
+
+    Falls back to returning the original name if no mapping exists.
+    """
+    name_map = _build_name_map()
+    mapped = name_map.get(conv_name)
+    if mapped is None:
+        return [conv_name]
+    if mapped == ["*"]:
+        return [conv_name]
+    return list(mapped)
+
+
 app = FastAPI(
     title="Forge OS Mission Control API",
     description="REST wrapper over vectordb/ query functions",
@@ -111,17 +145,18 @@ def api_projects():
     projects = list_projects()
 
     # Enrich with decision + thread counts per project
+    # Uses name resolution since registries may use different names
     db = get_database()
     for p in projects:
-        name = p["project_name"]
+        internal_names = _resolve_names(p["project_name"])
         p["decision_count"] = db["decision_registry"].count_documents(
-            {"project": name, "status": "active"}
+            {"project": {"$in": internal_names}, "status": "active"}
         )
         p["thread_count"] = db["thread_registry"].count_documents(
-            {"project": name, "status": {"$ne": "resolved"}}
+            {"project": {"$in": internal_names}, "status": {"$ne": "resolved"}}
         )
         p["flag_count"] = db["expedition_flags"].count_documents(
-            {"project": name, "status": "pending"}
+            {"project": {"$in": internal_names}, "status": "pending"}
         )
 
     return _json(projects)
@@ -134,25 +169,39 @@ def api_project_conversations(name: str):
 
 @app.get("/api/projects/{name}/decisions")
 def api_project_decisions(name: str):
-    return _json(get_active_decisions(name))
+    results = []
+    for internal_name in _resolve_names(name):
+        results.extend(get_active_decisions(internal_name))
+    return _json(results)
 
 
 @app.get("/api/projects/{name}/threads")
 def api_project_threads(name: str):
-    return _json(get_active_threads(name))
+    results = []
+    for internal_name in _resolve_names(name):
+        results.extend(get_active_threads(internal_name))
+    return _json(results)
 
 
 @app.get("/api/projects/{name}/stale")
 def api_project_stale(name: str):
+    all_decisions = []
+    all_threads = []
+    for internal_name in _resolve_names(name):
+        all_decisions.extend(get_stale_decisions(internal_name))
+        all_threads.extend(get_stale_threads(internal_name))
     return _json({
-        "decisions": get_stale_decisions(name),
-        "threads": get_stale_threads(name),
+        "decisions": all_decisions,
+        "threads": all_threads,
     })
 
 
 @app.get("/api/projects/{name}/flags")
 def api_project_flags(name: str):
-    return _json(get_all_flags(name))
+    results = []
+    for internal_name in _resolve_names(name):
+        results.extend(get_all_flags(internal_name))
+    return _json(results)
 
 
 @app.get("/api/projects/{name}/priming")
