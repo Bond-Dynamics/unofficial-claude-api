@@ -56,10 +56,11 @@ def assemble_compression_context(project, db=None):
     sections.append("### Active Threads")
     if active_threads:
         for t in active_threads:
+            label = t.get("global_display_id") or t["local_id"]
             status_tag = f"[{t['status'].upper()}]"
             priority_tag = f"({t['priority']})" if t.get("priority") else ""
             sections.append(
-                f"- {t['local_id']}: {t['title']} {status_tag} {priority_tag}"
+                f"- {label}: {t['title']} {status_tag} {priority_tag}"
             )
             if t.get("blocked_by"):
                 sections.append(f"  Blocked by: {', '.join(t['blocked_by'])}")
@@ -71,15 +72,17 @@ def assemble_compression_context(project, db=None):
     sections.append("### Stale Warnings")
     if stale_decisions or stale_threads:
         for d in stale_decisions:
+            label = d.get("global_display_id") or d["local_id"]
             hops = d.get("hops_since_validated", 0)
             sections.append(
-                f"- DECISION {d['local_id']}: \"{d['text'][:80]}...\" "
+                f"- DECISION {label}: \"{d['text'][:80]}...\" "
                 f"({hops} hops since validated)"
             )
         for t in stale_threads:
+            label = t.get("global_display_id") or t["local_id"]
             hops = t.get("hops_since_validated", 0)
             sections.append(
-                f"- THREAD {t['local_id']}: \"{t['title']}\" "
+                f"- THREAD {label}: \"{t['title']}\" "
                 f"({hops} hops since validated)"
             )
     else:
@@ -90,9 +93,10 @@ def assemble_compression_context(project, db=None):
     sections.append("### Conflict Alerts")
     if conflicted:
         for d in conflicted:
+            label = d.get("global_display_id") or d["local_id"]
             conflicts = d.get("conflicts_with", [])
             sections.append(
-                f"- {d['local_id']}: \"{d['text'][:80]}...\" "
+                f"- {label}: \"{d['text'][:80]}...\" "
                 f"conflicts with {len(conflicts)} decision(s): "
                 f"{', '.join(c[:8] + '...' for c in conflicts)}"
             )

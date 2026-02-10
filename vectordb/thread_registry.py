@@ -15,6 +15,7 @@ from vectordb.config import (
 )
 from vectordb.blob_store import store as blob_store
 from vectordb.db import get_database
+from vectordb.display_ids import allocate_display_id, register_display_id
 from vectordb.embeddings import embed_texts
 from vectordb.events import emit_event
 from vectordb.uuidv8 import thread_id as derive_thread_uuid
@@ -92,6 +93,8 @@ def upsert_thread(
         doc["resolution_blob_ref"] = resolution_blob_ref
 
     if existing is None:
+        display_id = allocate_display_id(project, "thread", db=db)
+        doc["global_display_id"] = display_id
         doc["created_at"] = now.isoformat()
         try:
             embeddings = embed_texts([title[:8000]])
@@ -99,6 +102,9 @@ def upsert_thread(
         except Exception:
             doc["embedding"] = [0.0] * EMBEDDING_DIMENSIONS
         collection.insert_one(doc)
+        register_display_id(
+            display_id, thread_uuid, COLLECTION_THREAD_REGISTRY, project, db=db,
+        )
         action = "inserted"
     else:
         update_fields = {

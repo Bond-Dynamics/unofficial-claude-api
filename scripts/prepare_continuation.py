@@ -90,13 +90,14 @@ def assemble_continuation_context(
         for tier_label in sorted(tier_groups.keys(), reverse=True):
             sections.append(f"\n**{tier_label}:**")
             for d in tier_groups[tier_label]:
+                label = d.get("global_display_id") or d["local_id"]
                 text_preview = d.get("text", d.get("title", ""))[:120]
                 deps = d.get("dependencies", [])
                 dep_str = f" [deps: {', '.join(deps)}]" if deps else ""
                 conflicts = d.get("conflicts_with", [])
                 conflict_str = f" [CONFLICTS: {len(conflicts)}]" if conflicts else ""
                 sections.append(
-                    f"- {d['local_id']}: {text_preview}{dep_str}{conflict_str}"
+                    f"- {label}: {text_preview}{dep_str}{conflict_str}"
                 )
     else:
         sections.append("- (none)")
@@ -106,12 +107,13 @@ def assemble_continuation_context(
     sections.append("### Open Threads")
     if active_threads:
         for t in active_threads:
+            label = t.get("global_display_id") or t["local_id"]
             status_tag = f"[{t['status'].upper()}]"
             priority_tag = f"({t['priority']})" if t.get("priority") else ""
             hops = t.get("hops_since_validated", 0)
             hops_str = f" [{hops} hops]" if hops > 0 else ""
             sections.append(
-                f"- {t['local_id']}: {t['title']} {status_tag} "
+                f"- {label}: {t['title']} {status_tag} "
                 f"{priority_tag}{hops_str}"
             )
             if t.get("blocked_by"):
@@ -125,15 +127,17 @@ def assemble_continuation_context(
     sections.append("### Warnings")
     if has_warnings:
         for d in stale_decisions:
+            label = d.get("global_display_id") or d["local_id"]
             hops = d.get("hops_since_validated", 0)
             sections.append(
-                f"- STALE DECISION {d['local_id']}: "
+                f"- STALE DECISION {label}: "
                 f"\"{d['text'][:60]}...\" ({hops} hops)"
             )
         for t in stale_threads:
+            label = t.get("global_display_id") or t["local_id"]
             hops = t.get("hops_since_validated", 0)
             sections.append(
-                f"- STALE THREAD {t['local_id']}: "
+                f"- STALE THREAD {label}: "
                 f"\"{t['title']}\" ({hops} hops)"
             )
     else:

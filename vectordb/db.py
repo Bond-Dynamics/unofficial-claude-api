@@ -9,6 +9,8 @@ from vectordb.config import (
     COLLECTION_COMPRESSION_REGISTRY,
     COLLECTION_CONVERSATION_REGISTRY,
     COLLECTION_DECISION_REGISTRY,
+    COLLECTION_DISPLAY_ID_COUNTERS,
+    COLLECTION_DISPLAY_ID_INDEX,
     COLLECTION_DOCUMENTS,
     COLLECTION_ENTANGLEMENT_SCANS,
     COLLECTION_EVENTS,
@@ -318,6 +320,18 @@ def ensure_forge_indexes(db=None):
     entanglement_scans.create_index("scanned_at")
     entanglement_scans.create_index("project")
 
+    # --- Display ID counters collection ---
+    display_id_counters = db[COLLECTION_DISPLAY_ID_COUNTERS]
+    display_id_counters.create_index(
+        [("project_prefix", 1), ("entity_type", 1)],
+        unique=True,
+    )
+
+    # --- Display ID index collection ---
+    display_id_index = db[COLLECTION_DISPLAY_ID_INDEX]
+    display_id_index.create_index("display_id", unique=True)
+    display_id_index.create_index("entity_uuid")
+
     return {
         "messages": messages,
         "conversations": conversations,
@@ -337,6 +351,8 @@ def ensure_forge_indexes(db=None):
         "priming_registry": priming_registry,
         "expedition_flags": expedition_flags,
         "entanglement_scans": entanglement_scans,
+        "display_id_counters": display_id_counters,
+        "display_id_index": display_id_index,
     }
 
 

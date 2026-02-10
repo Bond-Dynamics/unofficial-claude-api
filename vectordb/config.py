@@ -44,6 +44,10 @@ COLLECTION_COMPRESSION_REGISTRY = "compression_registry"
 # Forge OS Layer 2: GRAPH — identity registry
 COLLECTION_CONVERSATION_REGISTRY = "conversation_registry"
 
+# Forge OS Layer 2: GRAPH — global display IDs
+COLLECTION_DISPLAY_ID_COUNTERS = "display_id_counters"
+COLLECTION_DISPLAY_ID_INDEX = "display_id_index"
+
 # Forge OS Layer 2.5: EXPEDITION collections
 COLLECTION_PRIMING_REGISTRY = "priming_registry"
 COLLECTION_EXPEDITION_FLAGS = "expedition_flags"

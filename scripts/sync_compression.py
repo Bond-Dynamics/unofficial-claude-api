@@ -563,6 +563,7 @@ def main():
             print(f"  Decision {dec['local_id']}: {dec['text'][:80]}...")
         for thr in parsed["threads"]:
             print(f"  Thread {thr['local_id']}: {thr['title']}")
+        print("\n  (Global display IDs will be assigned on actual sync)")
         return
 
     # Sync

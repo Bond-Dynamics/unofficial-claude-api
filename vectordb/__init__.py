@@ -137,6 +137,13 @@ from vectordb.blob_store import (
     resolve as blob_resolve,
     resolve_batch as blob_resolve_batch,
 )
+from vectordb.display_ids import (
+    allocate_display_id,
+    bulk_backfill as display_id_backfill,
+    get_project_prefix,
+    register_display_id,
+    resolve_display_id,
+)
 from vectordb.vector_store import vector_search, vector_store
 
 __all__ = [
@@ -259,6 +266,12 @@ __all__ = [
     "blob_resolve_batch",
     "get_text_with_fallback",
     "resolve_documents",
+    # Global display IDs
+    "allocate_display_id",
+    "register_display_id",
+    "resolve_display_id",
+    "get_project_prefix",
+    "display_id_backfill",
     # Gravity assist (Layer 3.5)
     "gravity_orchestrate",
     "assign_role",

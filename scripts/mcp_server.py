@@ -846,6 +846,45 @@ def forge_blob_stats() -> str:
         return _json_response({"error": str(e)})
 
 
+@mcp.tool()
+def forge_resolve_display_id(display_id: str) -> str:
+    """Resolve a global display ID (e.g. FORGE-D-0042) to its entity UUID and collection.
+
+    Use this when you encounter a human-readable display ID and need the underlying entity.
+    Returns entity_uuid, collection name, and project.
+    """
+    try:
+        from vectordb.display_ids import resolve_display_id
+        result = resolve_display_id(display_id)
+        if result is None:
+            return _json_response({"error": f"Display ID '{display_id}' not found"})
+        return _json_response(result)
+    except Exception as e:
+        return _json_response({"error": str(e)})
+
+
+@mcp.tool()
+def forge_backfill_display_ids(project: str) -> str:
+    """Assign global display IDs to all existing decisions and threads that lack one.
+
+    Run this once per project to backfill display IDs for entities created before
+    the display ID system was added. Processes in created_at order.
+    """
+    try:
+        from vectordb.display_ids import bulk_backfill
+        from vectordb.config import COLLECTION_DECISION_REGISTRY, COLLECTION_THREAD_REGISTRY
+
+        decision_count = bulk_backfill(project, "decision", COLLECTION_DECISION_REGISTRY)
+        thread_count = bulk_backfill(project, "thread", COLLECTION_THREAD_REGISTRY)
+        return _json_response({
+            "project": project,
+            "decisions_backfilled": decision_count,
+            "threads_backfilled": thread_count,
+        })
+    except Exception as e:
+        return _json_response({"error": str(e)})
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------

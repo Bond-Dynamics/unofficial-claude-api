@@ -1160,6 +1160,31 @@ def api_forge_lens_delete(lens_name: str):
     return _json(delete_lens(lens_name))
 
 
+@app.get("/api/forge/display-id/{display_id}")
+def api_forge_resolve_display_id(display_id: str):
+    """Resolve a global display ID to its entity UUID and collection."""
+    from vectordb.display_ids import resolve_display_id
+    result = resolve_display_id(display_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Display ID '{display_id}' not found")
+    return _json(result)
+
+
+@app.post("/api/forge/display-ids/backfill")
+def api_forge_backfill_display_ids(project: str = Query(...)):
+    """Backfill global display IDs for existing decisions and threads."""
+    from vectordb.display_ids import bulk_backfill
+    from vectordb.config import COLLECTION_DECISION_REGISTRY, COLLECTION_THREAD_REGISTRY
+
+    decision_count = bulk_backfill(project, "decision", COLLECTION_DECISION_REGISTRY)
+    thread_count = bulk_backfill(project, "thread", COLLECTION_THREAD_REGISTRY)
+    return _json({
+        "project": project,
+        "decisions_backfilled": decision_count,
+        "threads_backfilled": thread_count,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------

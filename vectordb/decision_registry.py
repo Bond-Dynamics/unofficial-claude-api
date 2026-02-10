@@ -18,6 +18,7 @@ from vectordb.config import (
 )
 from vectordb.conflicts import detect_conflicts, register_conflict
 from vectordb.db import get_database
+from vectordb.display_ids import allocate_display_id, register_display_id
 from vectordb.embeddings import embed_texts
 from vectordb.blob_store import store as blob_store
 from vectordb.events import emit_event
@@ -168,9 +169,12 @@ def _insert_decision(
     text_blob_ref = blob_store(text)
     rationale_blob_ref = blob_store(rationale) if rationale else None
 
+    display_id = allocate_display_id(project, "decision", db=db)
+
     doc = {
         "uuid": decision_uuid,
         "local_id": local_id,
+        "global_display_id": display_id,
         "text": text[:8000],
         "text_hash": text_hash,
         "embedding": embedding,
@@ -196,6 +200,10 @@ def _insert_decision(
 
     collection.insert_one(doc)
 
+    register_display_id(
+        display_id, decision_uuid, COLLECTION_DECISION_REGISTRY, project, db=db,
+    )
+
     # Run conflict detection against existing decisions
     conflicts = []
     try:
@@ -219,6 +227,7 @@ def _insert_decision(
         {
             "uuid": decision_uuid,
             "local_id": local_id,
+            "global_display_id": display_id,
             "project": project,
             "conflict_count": len(conflicts),
         },
@@ -228,6 +237,7 @@ def _insert_decision(
     return {
         "action": "inserted",
         "uuid": decision_uuid,
+        "global_display_id": display_id,
         "conflicts": conflicts,
     }
 
