@@ -1,320 +1,250 @@
+# Forge OS — Persistent Semantic Memory for LLMs
 
-# unofficial-claude-api
+Forge OS gives LLMs something they don't have: **memory that persists across conversations, spans projects, and gets smarter over time.**
 
-## Table of Contents
+Every Claude conversation starts cold. Past decisions evaporate. Open questions vanish. Cross-project connections are invisible. Forge OS fixes this by building a living knowledge graph from your Claude.ai projects and exposing it through an attention-weighted recall engine that any LLM can query.
 
-- [Installation](#how-to-install)
-- [Requirements](#requirements)
-- [Example Usage](#example-usage)
-- [Advanced Usage](#advanced-usage)
-  - [Retrieving Chat History](#retrieving-chat-history)
-  - [Manual Session Data (Faster Loading)](#manual-session-data)
-  - [Using Proxies](#using-proxies)
-  - [Customization](#customization)
-    - [Changing model version](#changing-claude-model)
-    - [Changing Organization](#changing-organization)
-- [How to Contribute](#how-to-contribute)
-- [Donating](#donating)
+## What This Does
 
-## What is this?
+Forge OS ingests conversations from Claude.ai projects and transforms them into a structured, searchable knowledge graph stored in MongoDB Atlas with VoyageAI embeddings. It tracks:
 
-This unofficial Python API provides access to the conversational capabilities of Anthropic's Claude AI through a simple chat messaging interface.
+- **138+ decisions** with epistemic confidence tiers and conflict detection
+- **22+ open threads** (questions, blockers, unresolved work)
+- **Lineage edges** tracing how decisions flow across compression hops
+- **Entanglement clusters** revealing cross-project semantic resonances
+- **Priming blocks** compiled from expedition findings
+- **Patterns** learned from successful approaches
+- **Expedition flags** bookmarking observations for future compilation
 
-While not officially supported by Anthropic, this library can enable interesting conversational applications.
+Then it exposes all of this to LLMs through three interfaces:
 
-It allows for:
+| Interface | Transport | For |
+|-----------|-----------|-----|
+| **MCP Server** | stdio | Claude Code (native MCP support) |
+| **REST API** | HTTP | Any LLM via function calling |
+| **Tool Schemas** | JSON export | OpenAI, Anthropic, Gemini tool formats |
 
-- Creating chat sessions with Claude and getting chat IDs.
-- Sending messages to Claude containing up to 5 attachment files (txt, pdf, csv, png, jpeg, etc...) 10 MB each, images are also supported!
-- Retrieving chat message history, accessing specific chat conversations.
-- Deleting old chats when they are no longer needed.
-- Sending requests through proxies.
+## How It's Different from Plain Claude
 
-### Some of the key things you can do with Claude through this API
+| | Plain Claude | Claude + Forge OS |
+|---|---|---|
+| **Memory** | Starts cold every conversation | Recalls past decisions, threads, patterns |
+| **Cross-project** | No awareness of other projects | Detects entanglement clusters across 8+ projects |
+| **Decisions** | Lost at context boundary | Persisted, conflict-checked, epistemically tiered |
+| **Open questions** | Forgotten after compression | Tracked as threads with staleness alerts |
+| **Patterns** | Re-discovered each session | Stored and merged with confidence scores |
+| **Write-back** | LLM output is ephemeral | LLM registers decisions, threads, flags into the graph |
+| **Conflict detection** | None | Two-signal detection (embedding similarity + entity divergence) |
+| **Staleness** | No concept of it | Hop counting + time-based decay alerts |
 
-- Ask questions about a wide variety of topics. Claude can chat about current events, pop culture, sports,
-and more.
+## The Attention Engine
 
-- Get helpful explanations on complex topics. Ask Claude to explain concepts and ideas in simple terms.
+Plain vector search tells you "how semantically close." The attention engine tells you "how important." Each result is scored by:
 
-- Generate summaries from long text or documents. Just give the filepath as an attachment to Claude and get back a concise summary.
-
-- Receive thoughtful responses to open-ended prompts and ideas. Claude can brainstorm ideas, expand on concepts, and have philosophical discussions.
-
-- Send images and let Claude analyze them for you.
-
-## How to install
-
-```shell
-pip install unofficial-claude-api
+```
+attention = similarity × 0.45      # semantic relevance
+          + epistemic_tier × 0.20  # confidence level
+          + freshness × 0.15       # exponential decay (30-day half-life)
+          + conflict_bonus × 0.10  # demands attention if conflicts exist
+          + category_boost × 0.10  # decisions > threads > priming > patterns > messages
 ```
 
-## Uninstallation
+This means a validated decision from yesterday outranks a vaguely similar message from three months ago, even if the raw cosine similarity is identical.
 
-```shell
-pip uninstall unofficial-claude-api
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    LLM Layer                         │
+│  Claude Code (MCP) ─── GPT-4 (HTTP) ─── Any LLM    │
+└──────────┬──────────────────┬────────────────────────┘
+           │ stdio            │ HTTP POST
+           ▼                  ▼
+┌──────────────────┐  ┌─────────────────────┐
+│ scripts/          │  │ scripts/             │
+│  mcp_server.py   │  │  api_server.py       │
+│  (14 MCP tools)  │  │  (14 /api/forge/*    │
+│                  │  │   + 40 existing)     │
+└────────┬─────────┘  └──────────┬───────────┘
+         │                       │
+         ▼                       ▼
+┌──────────────────────────────────────────┐
+│        vectordb/attention.py              │
+│  Attention-weighted cross-collection      │
+│  recall engine (LLM-agnostic core)        │
+└──────────────────┬───────────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────────┐
+│         vectordb/ (28 modules)            │
+│  decisions · threads · lineage · patterns │
+│  priming · entanglement · scratchpad      │
+│  conflicts · flags · archive · embeddings │
+└──────────────────────────────────────────┘
+                   │
+                   ▼
+            MongoDB Atlas + VoyageAI
 ```
 
-## Requirements
+## 14 LLM Tools
 
-### These requirements are needed to auto retrieve a SessionData object using selenium
+### Read Tools
+| Tool | Purpose |
+|------|---------|
+| `forge_recall` | Attention-weighted search across all 6 collections |
+| `forge_project_context` | Full project state (decisions, threads, flags, stale, conflicts) |
+| `forge_entanglement` | Cross-project resonance clusters and bridges |
+| `forge_trace` | Lineage traversal through compression hops |
+| `forge_alerts` | System-wide staleness, conflicts, pending flags |
+| `forge_search` | Scoped vector search on a single collection |
+| `forge_stats` | System overview with collection counts |
+| `forge_projects` | All projects with decision/thread/flag counts |
+| `forge_session` | Current session scratchpad state |
 
-- Python >= 3.10
-- Firefox installed, and with at least one profile logged into [Claude](https://claude.ai/chats).
-- [geckodriver](https://github.com/mozilla/geckodriver/releases) installed inside a folder registered in PATH environment variable.
+### Write Tools
+| Tool | Purpose |
+|------|---------|
+| `forge_decide` | Register a decision with auto conflict detection |
+| `forge_thread` | Track an open question or resolve a thread |
+| `forge_flag` | Bookmark an observation for expedition compilation |
+| `forge_pattern` | Store a learned pattern (auto-merges similar) |
+| `forge_remember` | Session scratchpad (TTL key-value store) |
 
-***( scrolling through this README you'll find also a manual alternative )***
+## Quick Start
 
-## Example Usage
+### Prerequisites
 
-```python
-from sys import exit as sys_exit
-from claude_api.client import (
-    ClaudeAPIClient,
-    SendMessageResponse,
-)
-from claude_api.session import SessionData, get_session_data
-from claude_api.errors import ClaudeAPIError, MessageRateLimitError, OverloadError
+- Python 3.10+
+- MongoDB Atlas cluster with vector search indexes
+- VoyageAI API key (`VOYAGE_API_KEY`)
+- Firefox with a profile logged into claude.ai (for sync)
 
-# Wildcard import will also work the same as above
-# from claude_api import *
+### 1. Install Dependencies
 
-# List of attachments filepaths, up to 5, max 10 MB each
-FILEPATH_LIST = [] #["test.txt"]
-
-# Text message to send
-PROMPT = "Hello!"
-
-# This function will automatically retrieve a SessionData instance using selenium
-# It will auto gather cookie session, user agent and organization ID.
-# Omitting profile argument will use default Firefox profile
-session: SessionData = get_session_data()
-
-# Initialize a client instance using a session
-# Optionally change the requests timeout parameter to best fit your needs...default to 240 seconds.
-client = ClaudeAPIClient(session, timeout=240)
-
-# Create a new chat and cache the chat_id
-chat_id = client.create_chat()
-if not chat_id:
-    # This will not throw MessageRateLimitError
-    # But it still means that account has no more messages left.
-    print("\nMessage limit hit, cannot create chat...")
-    sys_exit(-1)
-
-try:
-    # Used for sending message with or without attachments
-    # Returns a SendMessageResponse instance
-    res: SendMessageResponse = client.send_message(
-        chat_id, PROMPT, attachment_paths=FILEPATH_LIST
-    )
-    # Inspect answer
-    if res.answer:
-        print(res.answer)
-    else:
-        # Inspect response status code and raw answer bytes
-        print(f"\nError code {res.status_code}, raw_answer: {res.raw_answer}")
-except ClaudeAPIError as e:
-    # Identify the error
-    if isinstance(e, MessageRateLimitError):
-        # The exception will hold these informations about the rate limit:
-        print(f"\nMessage limit hit, resets at {e.reset_date}")
-        print(f"\n{e.sleep_sec} seconds left until -> {e.reset_timestamp}")
-    elif isinstance(e, OverloadError):
-        print(f"\nOverloaded error: {e}")
-    else:
-        print(f"\nGot unknown Claude error: {e}")
-finally:
-    # Perform chat deletion for cleanup
-    client.delete_chat(chat_id)
-
-## (OPTIONAL) 
-
-# Get a list of all chats ids
-all_chat_ids = client.get_all_chat_ids()
-# Delete all chats
-for chat in all_chat_ids:
-    client.delete_chat(chat)
-
-# Or by using a shortcut utility
-# client.delete_all_chats()
+```bash
+pip install pymongo voyageai fastapi uvicorn mcp
 ```
 
-## Advanced Usage
+### 2. Set Environment Variables
 
-### Retrieving chat history
-
-```python
-# A convenience method to access a specific chat conversation is
-chat_data = client.get_chat_data(chat_id)
+```bash
+export MONGODB_URI="mongodb+srv://..."
+export VOYAGE_API_KEY="pa-..."
 ```
 
-`chat_data` will be the same json dictionary returned by calling
-`/api/organizations/{organization_id}/chat_conversations/{chat_id}`
+### 3. Connect Claude Code (MCP)
 
-Here's an example of this json:
-
-```json
-{
-    "uuid": "<ConversationUUID>",
-    "name": "",
-    "summary": "",
-    "model": null,
-    "created_at": "1997-12-25T13:33:33.959409+00:00",
-    "updated_at": "1997-12-25T13:33:39.487561+00:00",
-    "chat_messages": [
-        {
-            "uuid": "<MessageUUID>",
-            "text": "Who is Bugs Bunny?",
-            "sender": "human",
-            "index": 0,
-            "created_at": "1997-12-25T13:33:39.487561+00:00",
-            "updated_at": "1997-12-25T13:33:40.959409+00:00",
-            "edited_at": null,
-            "chat_feedback": null,
-            "attachments": []
-        },
-        {
-            "uuid": "<MessageUUID>",
-            "text": "<Claude response's text>",
-            "sender": "assistant",
-            "index": 1,
-            "created_at": "1997-12-25T13:33:40.959409+00:00",
-            "updated_at": "1997-12-25T13:33:42.487561+00:00",
-            "edited_at": null,
-            "chat_feedback": null,
-            "attachments": []
-        }
-    ]
-}
+```bash
+claude mcp add forge-os -- python scripts/mcp_server.py
 ```
 
-### Manual Session Data
-
-If for whatever reason you'd like to avoid auto session gathering using selenium,
-you just need to manually create a `SessionData` class for `ClaudeAPIClient` constructor, like so...
-
-```python
-from claude_api.session import SessionData
-
-cookie_header_value = "The entire Cookie header value string when you visit https://claude.ai/chats"
-user_agent = "User agent to use, required"
-
-# You can retrieve this string from /api/organizations endpoint
-# If omitted or None it will be auto retrieved when instantiating ClaudeAPIClient
-organization_id = "<org_uuid>"
-
-session = SessionData(cookie_header_value, user_agent, organization_id)
+Then in any Claude Code session:
+```
+> forge_recall("authentication patterns")
+> forge_stats()
+> forge_decide("Use JWT with refresh tokens", "My Project", "D042", tier=0.8)
 ```
 
-### Using Proxies
+### 4. Start the HTTP API
 
-#### How to set HTTP/S proxies
-
-If you'd like to set an HTTP proxy for all requests, follow this example:
-
-```py
-from claude_api.client import HTTPProxy, ClaudeAPIClient
-from claude_api.session import SessionData
-
-# Create HTTPProxy instance
-http_proxy = HTTPProxy(
-    "the.proxy.ip.addr",    # Proxy IP
-    8080,                   # Proxy port
-    "username",             # Proxy Username (optional)
-    "password",             # Proxy Password (optional)
-    use_ssl=False           # Set to True if proxy uses HTTPS schema
-)
-
-session = SessionData(...)
-
-# Give the proxy instance to ClaudeAPIClient constructor, along with session data.
-client = ClaudeAPIClient(session, proxy=http_proxy)
+```bash
+python scripts/api_server.py
+# Runs on http://localhost:8000
 ```
 
-#### How to set SOCKS proxies
-
-If you want to opt for SOCKS proxies instead, the procedure is the same, but you need to import the `SOCKSProxy` class instead, configuring it with the version number.
-
-```py
-from claude_api.client import SOCKSProxy, ClaudeAPIClient
-from claude_api.session import SessionData
-
-# Create SOCKSProxy instance
-socks_proxy = SOCKSProxy(
-    "the.proxy.ip.addr",    # Proxy IP
-    8080,                   # Proxy port
-    "username",             # Proxy Username (optional)
-    "password",             # Proxy Password (optional)
-    version_num=5           # Either 4 or 5, defaults to 4
-)
-
-session = SessionData(...)
-
-# Give the proxy instance to ClaudeAPIClient constructor as usual
-client = ClaudeAPIClient(session, proxy=socks_proxy)
+```bash
+curl -X POST http://localhost:8000/api/forge/recall \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "authentication patterns", "budget": 2000}'
 ```
 
-## Customization
+### 5. Export Tool Schemas (for GPT-4, Gemini, etc.)
 
-### Changing Claude model
-
-In case you'd like to change the model used, or you do have accounts that are unable to migrate to latest model, you can override the `model_name` string parameter of `ClaudeAPIClient` constructor like so:
-
-```py
-from claude_api.client import ClaudeAPIClient
-from claude_api.session import SessionData
-
-session = SessionData(...)
-
-# Defaults to None (latest Claude model)
-client = ClaudeAPIClient(session, model_name="claude-2.0")
+```bash
+python scripts/export_tool_schemas.py
+# Generates:
+#   config/forge_tools_openai.json
+#   config/forge_tools_anthropic.json
+#   config/forge_system_prompt.txt
 ```
 
-You can retrieve the `model_name` strings from the [official API docs](https://docs.anthropic.com/claude/docs/models-overview#model-comparison)
+## Project Structure
 
-### Changing Organization
-
-As reported in issue [#23](https://github.com/st1vms/unofficial-claude-api/issues/23)
-if you're encountering 403 errors when using Selenium to auto retrieve a `SessionData` class and your account has multiple organizations,
-you may want to override the default organization retrieved.
-
-By default `get_session_data` retrieves the last organization from the result array found [here](https://claude.ai/api/organizations).
-You can override the index to fetch by using parameter `organization_index`:
-
-```py
-from claude_api.session import get_session_data
-
-# Defaults to -1 (last entry)
-session = get_session_data(organization_index=-1)
+```
+├── vectordb/                  # Core library (28 modules, ~8,500 lines)
+│   ├── attention.py           # Attention-weighted recall engine
+│   ├── decision_registry.py   # Decision CRUD + conflict detection
+│   ├── thread_registry.py     # Thread tracking + resolution
+│   ├── entanglement.py        # Cross-project resonance discovery
+│   ├── lineage.py             # Compression-hop lineage graph
+│   ├── priming_registry.py    # Expedition priming blocks
+│   ├── patterns.py            # Learned pattern store + merge
+│   ├── expedition_flags.py    # Observation bookmarks
+│   ├── conflicts.py           # Two-signal conflict detection
+│   ├── embeddings.py          # VoyageAI embedding (voyage-3, 1024-dim)
+│   ├── context.py             # Legacy context assembly
+│   ├── scratchpad.py          # TTL key-value session state
+│   ├── conversation_registry.py # UUIDv8 identity registry
+│   ├── vector_store.py        # Generic vector store/search
+│   ├── uuidv8.py              # Deterministic UUIDv8 identity system
+│   ├── sync_engine.py         # Claude.ai project sync
+│   ├── claude_api.py          # Claude.ai session client
+│   └── ...
+├── scripts/
+│   ├── mcp_server.py          # MCP server (14 tools, stdio)
+│   ├── api_server.py          # FastAPI REST server
+│   ├── export_tool_schemas.py # OpenAI/Anthropic schema generator
+│   ├── run_sync.py            # Claude.ai sync runner
+│   └── ...
+├── web/                       # Next.js dashboard (Mission Control)
+│   └── app/
+│       ├── projects/          # Project explorer
+│       ├── decisions/         # Decision registry viewer
+│       ├── threads/           # Thread tracker
+│       ├── lineage/           # Lineage graph visualizer
+│       ├── entanglement/      # Entanglement cluster viewer
+│       └── search/            # Semantic search interface
+├── config/
+│   ├── sync_manifest.yaml     # Declarative sync configuration
+│   ├── forge_tools_openai.json
+│   ├── forge_tools_anthropic.json
+│   └── forge_system_prompt.txt
+└── examples/
+    └── fetch_conversations.py
 ```
 
-## How to Contribute
+## How the Sync Pipeline Works
 
-Contributions are welcome, please follow these guidelines to contribute:
+1. **Fetch** — Pull conversations from Claude.ai via browser session cookies
+2. **Parse** — Extract decisions (D001...), threads (T001...), compression archives
+3. **Identity** — Assign deterministic UUIDv8 identifiers to everything
+4. **Embed** — Generate VoyageAI embeddings (voyage-3, 1024 dimensions)
+5. **Detect** — Run conflict detection and entanglement scans
+6. **Store** — Upsert into MongoDB Atlas with vector search indexes
+7. **Serve** — Expose via MCP, HTTP, and exported tool schemas
 
-1. **Fork the repository** and create a new branch for your feature or fix.
+## Benefits
 
-2. **Make your changes**. Ensure the code is clean, well-documented, and consistent with the existing style.
+**For individual developers:**
+- Never re-explain context to Claude. Past decisions are recalled automatically.
+- Track open questions across sessions. Nothing falls through the cracks.
+- Detect when new decisions conflict with established ones before committing.
 
-3. **Test your changes** before submitting. Also include unit tests in your pull request where appropriate.
+**For multi-project work:**
+- Discover cross-project patterns you didn't know existed (entanglement).
+- Carry validated decisions across project boundaries via lineage.
+- Use expedition flags to bookmark insights during exploration for later synthesis.
 
-5. **Create a pull request** to the latest `dev-*` branch. Include a clear description of your changes.
+**For teams:**
+- Shared decision registry with epistemic tiers (how confident is this decision?).
+- Staleness alerts surface decisions that haven't been validated recently.
+- Audit trail via event logging tracks every read and write.
 
-### Notes
-- Stick to the current architecture and avoid unnecessary dependencies.
-- If the change involves significant refactoring or bug fixes, open an issue first to discuss it.
-- Ensure any modified or new code is covered by tests with reproducible results.
-
-All contributions must respect the licensing terms in the repository.
+**For LLM workflows:**
+- MCP integration means zero-config for Claude Code users.
+- HTTP API + exported schemas work with any LLM that supports function calling.
+- Session scratchpad enables multi-turn workflows without losing intermediate state.
 
 ## Disclaimer
 
-This repository provides an unofficial API for automating free accounts on [claude.ai](https://claude.ai/chats).
-Please note that this API is not endorsed, supported, or maintained by Anthropic. Use it at your own discretion and risk. Anthropic may make changes to their official product or APIs at any time, which could affect the functionality of this unofficial API. We do not guarantee the accuracy, reliability, or security of the information and data retrieved using this API. By using this repository, you agree that the maintainers are not responsible for any damages, issues, or consequences that may arise from its usage. Always refer to Anthropic's official documentation and terms of use. This project is maintained independently by contributors who are not affiliated with Anthropic.
-
-## Donations
-
-A huge thank you in advance to anyone who wants to donate :)
-
-[![Buy Me a Pizza](https://img.buymeacoffee.com/button-api/?text=1%20Pizza%20Margherita&emoji=🍕&slug=st1vms&button_colour=0fa913&font_colour=ffffff&font_family=Bree&outline_colour=ffffff&coffee_colour=FFDD00)](https://www.buymeacoffee.com/st1vms)
+This project uses an unofficial API for accessing Claude.ai conversations. It is not endorsed, supported, or maintained by Anthropic. Use at your own discretion. The sync pipeline requires browser session cookies from a logged-in Claude.ai account.

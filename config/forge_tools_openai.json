@@ -1,0 +1,489 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_recall",
+      "description": "Search Forge OS memory with attention-weighted scoring across decisions, threads, priming blocks, patterns, conversations, and messages.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to search for (natural language)"
+          },
+          "project": {
+            "type": "string",
+            "description": "Optional project name to restrict search"
+          },
+          "budget": {
+            "type": "integer",
+            "description": "Max characters for context text (default 4000)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_project_context",
+      "description": "Get full project state: decisions, threads, flags, stale items, conflicts.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project display name"
+          },
+          "sections": {
+            "type": "string",
+            "description": "Comma-separated sections: decisions,threads,flags,stale,conflicts"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_context_load",
+      "description": "One-call conversation bootstrap: project state + optional query recall. Call this at the start of every conversation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project display name"
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional search query for additional context recall"
+          },
+          "budget": {
+            "type": "integer",
+            "description": "Max chars for combined context (default 6000)"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_entanglement",
+      "description": "Get cross-project entanglement data: clusters, bridges, loose ends.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional text to filter clusters by relevance"
+          },
+          "project": {
+            "type": "string",
+            "description": "Optional project name to filter"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_trace",
+      "description": "Trace the lineage of a conversation through compression hops.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "description": "Conversation identifier (UUID, name, or prefix)"
+          }
+        },
+        "required": [
+          "conversation_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_alerts",
+      "description": "Get system-wide alerts: stale items, conflicts, pending flags, loose ends.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_search",
+      "description": "Semantic vector search within a specific collection.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query text"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Collection: conversations, messages, decisions, patterns",
+            "enum": [
+              "conversations",
+              "messages",
+              "decisions",
+              "patterns"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results (default 10, max 50)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_decide",
+      "description": "Register a decision in Forge OS with automatic conflict detection.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Full decision text"
+          },
+          "project": {
+            "type": "string",
+            "description": "Project display name"
+          },
+          "local_id": {
+            "type": "string",
+            "description": "Archive-local ID (e.g. D042)"
+          },
+          "tier": {
+            "type": "number",
+            "description": "Epistemic confidence (0.0-1.0)"
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Rationale for the decision"
+          }
+        },
+        "required": [
+          "text",
+          "project",
+          "local_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_thread",
+      "description": "Track an open question or resolve an existing thread.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Thread title/question"
+          },
+          "project": {
+            "type": "string",
+            "description": "Project display name"
+          },
+          "local_id": {
+            "type": "string",
+            "description": "Archive-local ID (e.g. T007)"
+          },
+          "status": {
+            "type": "string",
+            "description": "Status: open, resolved, blocked",
+            "enum": [
+              "open",
+              "resolved",
+              "blocked"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "description": "Priority: high, medium, low",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "resolution": {
+            "type": "string",
+            "description": "Resolution text (required if status=resolved)"
+          }
+        },
+        "required": [
+          "title",
+          "project",
+          "local_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_flag",
+      "description": "Bookmark an observation or finding for future expedition compilation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What was observed/flagged"
+          },
+          "project": {
+            "type": "string",
+            "description": "Project display name"
+          },
+          "category": {
+            "type": "string",
+            "description": "Category: inversion, isomorphism, fsd, manifestation, trap, general"
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional surrounding context text"
+          }
+        },
+        "required": [
+          "description",
+          "project"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_pattern",
+      "description": "Store a learned pattern (merges if similar pattern exists).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Pattern content text"
+          },
+          "pattern_type": {
+            "type": "string",
+            "description": "Type: routing, execution, error_recovery, optimization"
+          },
+          "success_score": {
+            "type": "number",
+            "description": "Success score (0.0-1.0)"
+          }
+        },
+        "required": [
+          "content",
+          "pattern_type",
+          "success_score"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_remember",
+      "description": "Store a key-value pair in the session scratchpad (TTL: 1 hour).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Key name"
+          },
+          "value": {
+            "type": "string",
+            "description": "Value to store"
+          }
+        },
+        "required": [
+          "key",
+          "value"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_session",
+      "description": "Get all key-value pairs stored in the current session scratchpad.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_stats",
+      "description": "Get Forge OS system overview with collection counts.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_projects",
+      "description": "List all projects with decision/thread/flag counts.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_orchestrate",
+      "description": "Multi-lens gravity-assisted recall across project roles. Runs attention-weighted recall through multiple project lenses in parallel, detecting convergence and divergence.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to search for (natural language)"
+          },
+          "lens_name": {
+            "type": "string",
+            "description": "Named lens config to use (e.g. 'gravity-assist')"
+          },
+          "lenses": {
+            "type": "array",
+            "description": "Array of {project_name, role, weight?} objects. Overrides lens_name."
+          },
+          "budget": {
+            "type": "integer",
+            "description": "Max characters for combined output (default 6000)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_roles",
+      "description": "Manage project epistemic role assignments for gravity assist. Roles: connector, navigator, builder, evaluator, critic, compiler.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Operation: list, get, assign, remove",
+            "enum": [
+              "list",
+              "get",
+              "assign",
+              "remove"
+            ]
+          },
+          "project_name": {
+            "type": "string",
+            "description": "Project display name (required for get/assign/remove)"
+          },
+          "role": {
+            "type": "string",
+            "description": "Role type (required for assign)",
+            "enum": [
+              "connector",
+              "navigator",
+              "builder",
+              "evaluator",
+              "critic",
+              "compiler"
+            ]
+          },
+          "weight": {
+            "type": "number",
+            "description": "Role weight 0.0-1.0 (default 1.0)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Custom role description override"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_lenses",
+      "description": "Manage named lens configurations for gravity-assisted orchestration. A lens is a reusable set of project-role assignments.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Operation: list, get, save, delete",
+            "enum": [
+              "list",
+              "get",
+              "save",
+              "delete"
+            ]
+          },
+          "lens_name": {
+            "type": "string",
+            "description": "Lens name (required for get/save/delete)"
+          },
+          "projects": {
+            "type": "array",
+            "description": "Array of {project_name, role, weight?} for save"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable lens description"
+          },
+          "default_budget": {
+            "type": "integer",
+            "description": "Default budget in chars (default 6000)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    }
+  }
+]
