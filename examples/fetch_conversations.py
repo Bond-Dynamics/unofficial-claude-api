@@ -301,8 +301,10 @@ def save_artifacts(artifacts, conversation_id, artifacts_dir):
     return saved
 
 
-def main():
+def main(force=False):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting conversation sync")
+    if force:
+        print("FORCE MODE: re-fetching all conversations regardless of updated_at")
 
     # Read cookies from Firefox
     print("Reading cookies from Firefox profile...")
@@ -381,9 +383,26 @@ def main():
     artifacts_dir.mkdir(exist_ok=True)
 
     # Fetch full data for each conversation (with artifacts via rendering_mode=messages)
+    # Only keep lightweight metadata in memory — full data goes straight to disk.
     print("Fetching full conversation data (with artifacts)...")
-    full_conversations = []
+    conversation_index = []  # lightweight: only fields needed for index.json
     total_artifacts = 0
+
+    def _index_entry(conv_data):
+        """Extract only the fields needed for the index (not full messages)."""
+        return {
+            "name": conv_data.get("name") or "(Untitled)",
+            "uuid": conv_data.get("uuid"),
+            "model": conv_data.get("model"),
+            "created_at": conv_data.get("created_at"),
+            "updated_at": conv_data.get("updated_at"),
+            "message_count": len(conv_data.get("chat_messages", [])),
+            "artifact_count": conv_data.get("_artifact_count", 0),
+            "is_starred": conv_data.get("is_starred", False),
+            "settings": conv_data.get("settings", {}),
+            "project_name": conv_data.get("project_name", "No Project"),
+        }
+
     for i, chat in enumerate(conversations):
         chat_id = chat.get("uuid", "")
         name = chat.get("name") or "(Untitled)"
@@ -391,10 +410,10 @@ def main():
 
         # Check if we already have this conversation and it hasn't been updated
         chat_file = conversations_dir / f"{chat_id}.json"
-        if chat_file.exists():
+        if not force and chat_file.exists():
             existing = json.loads(chat_file.read_text())
             if existing.get("updated_at") == chat.get("updated_at"):
-                full_conversations.append(existing)
+                conversation_index.append(_index_entry(existing))
                 total_artifacts += existing.get("_artifact_count", 0)
                 print(f"  {progress} Skipped (unchanged): {name}")
                 continue
@@ -437,12 +456,12 @@ def main():
                 chat_data["_artifact_count"] = conv_artifact_count
                 total_artifacts += conv_artifact_count
 
-            # Save individual conversation
+            # Save full conversation to disk, keep only metadata in memory
             chat_file.write_text(
                 json.dumps(chat_data, indent=2, ensure_ascii=False)
             )
-            full_conversations.append(chat_data)
             msg_count = len(chat_data.get("chat_messages", []))
+            conversation_index.append(_index_entry(chat_data))
             artifact_note = f", {conv_artifact_count} artifacts" if conv_artifact_count else ""
             print(f"  {progress} Saved ({msg_count} msgs{artifact_note}): {name}")
         else:
@@ -490,7 +509,7 @@ def main():
 
             # Check if already fetched and unchanged
             session_file = sessions_dir / f"{session_id}.json"
-            if session_file.exists():
+            if not force and session_file.exists():
                 existing = json.loads(session_file.read_text())
                 if existing.get("updated_at") == session.get("updated_at"):
                     total_sessions += 1
@@ -523,15 +542,15 @@ def main():
         print("  No code repos found (or endpoint unavailable)")
 
     # --- Count starred conversations ---
-    total_starred = sum(1 for c in full_conversations if c.get("is_starred"))
+    total_starred = sum(1 for c in conversation_index if c.get("is_starred"))
 
     # Group by project
     grouped = {}
-    for chat in full_conversations:
-        project_name = chat.get("project_name", "No Project")
+    for entry in conversation_index:
+        project_name = entry.get("project_name", "No Project")
         if project_name not in grouped:
             grouped[project_name] = []
-        grouped[project_name].append(chat)
+        grouped[project_name].append(entry)
 
     for project_name in grouped:
         grouped[project_name].sort(
@@ -549,7 +568,7 @@ def main():
         "synced_at": datetime.now().isoformat(),
         "organization": org_name,
         "organization_id": org_id,
-        "total_conversations": len(full_conversations),
+        "total_conversations": len(conversation_index),
         "total_projects": len(project_map),
         "total_artifacts": total_artifacts,
         "total_starred": total_starred,
@@ -557,22 +576,8 @@ def main():
         "total_code_sessions": total_sessions,
         "total_code_repos": total_repos,
         "projects": {
-            name: [
-                {
-                    "name": c.get("name") or "(Untitled)",
-                    "uuid": c.get("uuid"),
-                    "model": c.get("model"),
-                    "created_at": c.get("created_at"),
-                    "updated_at": c.get("updated_at"),
-                    "message_count": len(c.get("chat_messages", [])),
-                    "artifact_count": c.get("_artifact_count", 0),
-                    "is_starred": c.get("is_starred", False),
-                    "settings": c.get("settings", {}),
-                    "project_name": name,
-                }
-                for c in chats
-            ]
-            for name, chats in sorted(grouped.items())
+            name: list(entries)
+            for name, entries in sorted(grouped.items())
         },
     }
 
@@ -581,7 +586,7 @@ def main():
 
     # Summary
     print(f"\nSync complete!")
-    print(f"  Conversations:      {len(full_conversations)} ({total_starred} starred)")
+    print(f"  Conversations:      {len(conversation_index)} ({total_starred} starred)")
     print(f"  Projects:           {len(project_map)}")
     print(f"  Artifacts:          {total_artifacts}")
     print(f"  Published:          {total_published}")
@@ -602,7 +607,7 @@ def main():
             print("\nMongoDB detected. Running embedding pipeline...")
             from vectordb.pipeline import run_pipeline
 
-            run_pipeline()
+            run_pipeline(force=force)
         else:
             print("\nMongoDB not running. Skipping embedding step.")
             print("  Start it with: scripts/start_mongodb.sh")
@@ -614,4 +619,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(force="--force" in sys.argv)

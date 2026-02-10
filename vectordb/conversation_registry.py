@@ -179,7 +179,7 @@ def list_project_conversations(project_name, db=None):
         db[COLLECTION_CONVERSATION_REGISTRY].find(
             {"project_name": project_name},
             {"_id": 0},
-        ).sort("created_at_ms", 1)
+        ).sort("created_at_ms", -1)
     )
 
 

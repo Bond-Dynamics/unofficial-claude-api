@@ -10,6 +10,7 @@ from vectordb.config import (
     COLLECTION_CONVERSATION_REGISTRY,
     COLLECTION_DECISION_REGISTRY,
     COLLECTION_DOCUMENTS,
+    COLLECTION_ENTANGLEMENT_SCANS,
     COLLECTION_EVENTS,
     COLLECTION_EXPEDITION_FLAGS,
     COLLECTION_LINEAGE_EDGES,
@@ -250,6 +251,11 @@ def ensure_forge_indexes(db=None):
     thread_registry.create_index("uuid", unique=True)
     thread_registry.create_index([("project", 1), ("status", 1)])
     thread_registry.create_index([("status", 1), ("updated_at", 1)])
+    _create_filtered_vector_index(
+        thread_registry,
+        VECTOR_INDEX_NAME,
+        filter_fields=["project", "status"],
+    )
 
     # --- Decision registry collection ---
     decision_registry = db[COLLECTION_DECISION_REGISTRY]
@@ -306,6 +312,12 @@ def ensure_forge_indexes(db=None):
     expedition_flags.create_index([("project", 1), ("category", 1)])
     expedition_flags.create_index("conversation_id")
 
+    # --- Entanglement scans collection ---
+    entanglement_scans = db[COLLECTION_ENTANGLEMENT_SCANS]
+    entanglement_scans.create_index("scan_id", unique=True)
+    entanglement_scans.create_index("scanned_at")
+    entanglement_scans.create_index("project")
+
     return {
         "messages": messages,
         "conversations": conversations,
@@ -324,6 +336,7 @@ def ensure_forge_indexes(db=None):
         "compression_registry": compression_registry,
         "priming_registry": priming_registry,
         "expedition_flags": expedition_flags,
+        "entanglement_scans": entanglement_scans,
     }
 
 

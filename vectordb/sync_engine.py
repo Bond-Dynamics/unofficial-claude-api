@@ -61,7 +61,7 @@ def _status_matches(item_status: str, filter_spec: Optional[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 def compile_decisions(
-    internal_names: list[str],
+    source_names: list[str],
     filters: dict,
     merge: bool,
     doc_prefix: str,
@@ -69,7 +69,7 @@ def compile_decisions(
     """Compile active decisions into markdown doc(s).
 
     Args:
-        internal_names: Forge OS project names to pull from.
+        source_names: Forge OS project names to pull from.
         filters: Filter dict from resolved manifest target.
         merge: If True, merge all projects into one doc.
         doc_prefix: Filename prefix (e.g. "forge").
@@ -80,7 +80,7 @@ def compile_decisions(
     status_filter = filters.get("decisions_status", "active")
     all_decisions = []
 
-    for name in internal_names:
+    for name in source_names:
         decisions = get_active_decisions(name)
         for d in decisions:
             if not _passes_filters(d, filters):
@@ -95,7 +95,7 @@ def compile_decisions(
     if merge:
         return [_build_merged_decisions_doc(all_decisions, doc_prefix)]
 
-    return _build_per_project_decisions_docs(all_decisions, internal_names, doc_prefix)
+    return _build_per_project_decisions_docs(all_decisions, source_names, doc_prefix)
 
 
 def _build_merged_decisions_doc(
@@ -124,7 +124,7 @@ def _build_merged_decisions_doc(
 
 def _build_per_project_decisions_docs(
     decisions: list[dict],
-    internal_names: list[str],
+    source_names: list[str],
     doc_prefix: str,
 ) -> list[dict]:
     by_project: dict[str, list[dict]] = {}
@@ -133,7 +133,7 @@ def _build_per_project_decisions_docs(
         by_project.setdefault(proj, []).append(d)
 
     docs = []
-    for name in internal_names:
+    for name in source_names:
         proj_decisions = by_project.get(name, [])
         if not proj_decisions:
             continue
@@ -177,7 +177,7 @@ def _format_decision(d: dict) -> list[str]:
 
 
 def compile_threads(
-    internal_names: list[str],
+    source_names: list[str],
     filters: dict,
     merge: bool,
     doc_prefix: str,
@@ -186,7 +186,7 @@ def compile_threads(
     status_filter = filters.get("threads_status")
     all_threads = []
 
-    for name in internal_names:
+    for name in source_names:
         threads = get_active_threads(name)
         for t in threads:
             if not _passes_filters(t, filters):
@@ -201,7 +201,7 @@ def compile_threads(
     if merge:
         return [_build_merged_threads_doc(all_threads, doc_prefix)]
 
-    return _build_per_project_threads_docs(all_threads, internal_names, doc_prefix)
+    return _build_per_project_threads_docs(all_threads, source_names, doc_prefix)
 
 
 def _build_merged_threads_doc(threads: list[dict], doc_prefix: str) -> dict:
@@ -228,7 +228,7 @@ def _build_merged_threads_doc(threads: list[dict], doc_prefix: str) -> dict:
 
 def _build_per_project_threads_docs(
     threads: list[dict],
-    internal_names: list[str],
+    source_names: list[str],
     doc_prefix: str,
 ) -> list[dict]:
     by_project: dict[str, list[dict]] = {}
@@ -237,7 +237,7 @@ def _build_per_project_threads_docs(
         by_project.setdefault(proj, []).append(t)
 
     docs = []
-    for name in internal_names:
+    for name in source_names:
         proj_threads = by_project.get(name, [])
         if not proj_threads:
             continue
@@ -278,7 +278,7 @@ def _format_thread(t: dict) -> list[str]:
 
 
 def compile_flags(
-    internal_names: list[str],
+    source_names: list[str],
     filters: dict,
     merge: bool,
     doc_prefix: str,
@@ -287,7 +287,7 @@ def compile_flags(
     status_filter = filters.get("flags_status", "pending")
     all_flags = []
 
-    for name in internal_names:
+    for name in source_names:
         flags = get_pending_flags(name) if status_filter == "pending" else []
         for f in flags:
             if not _passes_filters(f, filters):
@@ -323,7 +323,7 @@ def compile_flags(
 
 
 def compile_conflicts(
-    internal_names: list[str],
+    source_names: list[str],
     doc_prefix: str,
 ) -> list[dict]:
     """Compile conflicting decisions into a side-by-side markdown doc."""
@@ -333,7 +333,7 @@ def compile_conflicts(
     conflicts_found = []
     seen_pairs = set()
 
-    for name in internal_names:
+    for name in source_names:
         decisions = list(collection.find(
             {"project": name, "status": "active", "conflicts_with": {"$ne": []}},
             {"_id": 0, "embedding": 0},
@@ -404,7 +404,7 @@ def _resolve_decision_names(decision_uuids: list[str]) -> list[str]:
 
 
 def compile_lineage_summary(
-    internal_names: list[str],
+    source_names: list[str],
     doc_prefix: str,
 ) -> list[dict]:
     """Compile a lineage summary: chain counts, cross-project edges, carried/dropped.
@@ -416,13 +416,13 @@ def compile_lineage_summary(
     # (e.g. "Reality Compiler"). Search with both sets to catch all.
     all_edges = []
     searched = set()
-    for name in internal_names:
+    for name in source_names:
         if name not in searched:
             searched.add(name)
             all_edges.extend(get_full_graph(project=name))
 
     # Also search with no filter if we have wildcard-level coverage
-    if len(internal_names) > 5:
+    if len(source_names) > 5:
         all_edges.extend(get_full_graph())
 
     # Deduplicate by edge_uuid
@@ -497,6 +497,93 @@ def compile_lineage_summary(
 
 
 # ---------------------------------------------------------------------------
+# Entanglement compiler
+# ---------------------------------------------------------------------------
+
+def compile_entanglement(
+    source_names: list[str],
+    doc_prefix: str,
+) -> list[dict]:
+    """Compile cross-project entanglement scan into a markdown doc.
+
+    Uses the latest cached scan if available, otherwise runs a fresh
+    scan and persists it.
+    """
+    from vectordb.entanglement import get_latest_scan, scan_and_save
+
+    result = get_latest_scan()
+    if result is None:
+        result = scan_and_save()
+
+    clusters = result.get("clusters", [])
+    bridges = result.get("bridges", [])
+    loose_ends = result.get("loose_ends", [])
+    item_count = len(clusters) + len(bridges) + len(loose_ends)
+
+    if item_count == 0:
+        return []
+
+    lines = ["# Cross-Project Entanglement Map\n"]
+    lines.append(
+        f"_Auto-synced from Forge OS. {result['resonances_found']} resonances "
+        f"across {result['decisions_scanned']} decisions and "
+        f"{result['threads_scanned']} threads. {_timestamp()}_\n"
+    )
+    lines.append(f"- **Strong resonances (>= 0.65):** {result['by_tier']['strong']}")
+    lines.append(f"- **Weak resonances (>= 0.50):** {result['by_tier']['weak']}")
+    lines.append(f"- **Clusters:** {len(clusters)}")
+    lines.append(f"- **Lineage bridges:** {len(bridges)}")
+    lines.append(f"- **Loose ends:** {len(loose_ends)}")
+    lines.append("")
+
+    if clusters:
+        lines.append("## Entanglement Clusters\n")
+        for c in clusters:
+            projects_str = ", ".join(c["projects"])
+            lines.append(
+                f"### Cluster {c['cluster_id']} — {projects_str} "
+                f"(avg: {c['avg_similarity']:.2f})\n"
+            )
+            for item in c["items"]:
+                label = item.get("local_id") or item["uuid"][:12]
+                lines.append(
+                    f"- **[{item['type'].upper()}]** {label} "
+                    f"({item['project']}): {item['text'][:120]}"
+                )
+            lines.append("")
+            strongest = c["strongest_link"]
+            lines.append(f"_Strongest link: {strongest['similarity']:.2f}_\n")
+
+    if bridges:
+        lines.append("## Lineage Bridges\n")
+        lines.append("_Items carried across project boundaries in lineage chains._\n")
+        for b in bridges:
+            projects_str = ", ".join(b["projects"])
+            lines.append(
+                f"- **[{b['type'].upper()}]** {b['uuid'][:12]}... "
+                f"spans {projects_str} ({b['edge_count']} edges)"
+            )
+        lines.append("")
+
+    if loose_ends:
+        lines.append("## Loose Ends\n")
+        lines.append("_Items with zero cross-project resonances._\n")
+        for le in loose_ends:
+            label = le.get("local_id") or le["uuid"][:12]
+            lines.append(
+                f"- **[{le['type'].upper()}]** {label} "
+                f"({le['project']}): {le['text'][:100]}"
+            )
+        lines.append("")
+
+    return [{
+        "file_name": f"{doc_prefix}_entanglement.md",
+        "content": "\n".join(lines),
+        "item_count": item_count,
+    }]
+
+
+# ---------------------------------------------------------------------------
 # Compiler dispatch
 # ---------------------------------------------------------------------------
 
@@ -506,6 +593,7 @@ _COMPILERS = {
     "flags": compile_flags,
     "conflicts": lambda names, filters, merge, prefix: compile_conflicts(names, prefix),
     "lineage_summary": lambda names, filters, merge, prefix: compile_lineage_summary(names, prefix),
+    "entanglement": lambda names, filters, merge, prefix: compile_entanglement(names, prefix),
 }
 
 
@@ -517,7 +605,7 @@ def _compile_for_target(target: dict) -> list[dict]:
         if compiler is None:
             continue
         result = compiler(
-            target["internal_names"],
+            target["source_names"],
             target["filters"],
             target["merge"],
             target["doc_prefix"],

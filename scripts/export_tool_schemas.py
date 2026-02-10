@@ -140,6 +140,38 @@ TOOLS = [
         "description": "List all projects with decision/thread/flag counts.",
         "parameters": {},
     },
+    {
+        "name": "forge_orchestrate",
+        "description": "Multi-lens gravity-assisted recall across project roles. Runs attention-weighted recall through multiple project lenses in parallel, detecting convergence and divergence.",
+        "parameters": {
+            "query": {"type": "string", "description": "What to search for (natural language)", "required": True},
+            "lens_name": {"type": "string", "description": "Named lens config to use (e.g. 'gravity-assist')"},
+            "lenses": {"type": "array", "description": "Array of {project_name, role, weight?} objects. Overrides lens_name."},
+            "budget": {"type": "integer", "description": "Max characters for combined output (default 6000)"},
+        },
+    },
+    {
+        "name": "forge_roles",
+        "description": "Manage project epistemic role assignments for gravity assist. Roles: connector, navigator, builder, evaluator, critic, compiler.",
+        "parameters": {
+            "action": {"type": "string", "description": "Operation: list, get, assign, remove", "required": True, "enum": ["list", "get", "assign", "remove"]},
+            "project_name": {"type": "string", "description": "Project display name (required for get/assign/remove)"},
+            "role": {"type": "string", "description": "Role type (required for assign)", "enum": ["connector", "navigator", "builder", "evaluator", "critic", "compiler"]},
+            "weight": {"type": "number", "description": "Role weight 0.0-1.0 (default 1.0)"},
+            "description": {"type": "string", "description": "Custom role description override"},
+        },
+    },
+    {
+        "name": "forge_lenses",
+        "description": "Manage named lens configurations for gravity-assisted orchestration. A lens is a reusable set of project-role assignments.",
+        "parameters": {
+            "action": {"type": "string", "description": "Operation: list, get, save, delete", "required": True, "enum": ["list", "get", "save", "delete"]},
+            "lens_name": {"type": "string", "description": "Lens name (required for get/save/delete)"},
+            "projects": {"type": "array", "description": "Array of {project_name, role, weight?} for save"},
+            "description": {"type": "string", "description": "Human-readable lens description"},
+            "default_budget": {"type": "integer", "description": "Default budget in chars (default 6000)"},
+        },
+    },
 ]
 
 
@@ -211,11 +243,15 @@ Available tools:
 
 Guidelines:
 - Call forge_recall at the start of a conversation to load relevant context.
+- Use forge_orchestrate for multi-lens gravity-assisted analysis when working
+  across project domains (e.g. connecting Nexus insights with Codex direction).
 - When you make a decision, register it with forge_decide.
 - When you identify an open question, track it with forge_thread.
 - Use forge_flag to bookmark observations for later compilation.
 - Use forge_remember to persist session state across messages.
 - Check forge_alerts periodically for stale items and conflicts.
+- Use forge_roles to assign epistemic roles to projects (connector, navigator, etc.).
+- Use forge_lenses to save reusable project-role combinations for orchestration.
 """
 
 

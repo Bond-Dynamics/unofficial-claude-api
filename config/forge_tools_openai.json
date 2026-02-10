@@ -364,5 +364,126 @@
         "properties": {}
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_orchestrate",
+      "description": "Multi-lens gravity-assisted recall across project roles. Runs attention-weighted recall through multiple project lenses in parallel, detecting convergence and divergence.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to search for (natural language)"
+          },
+          "lens_name": {
+            "type": "string",
+            "description": "Named lens config to use (e.g. 'gravity-assist')"
+          },
+          "lenses": {
+            "type": "array",
+            "description": "Array of {project_name, role, weight?} objects. Overrides lens_name."
+          },
+          "budget": {
+            "type": "integer",
+            "description": "Max characters for combined output (default 6000)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_roles",
+      "description": "Manage project epistemic role assignments for gravity assist. Roles: connector, navigator, builder, evaluator, critic, compiler.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Operation: list, get, assign, remove",
+            "enum": [
+              "list",
+              "get",
+              "assign",
+              "remove"
+            ]
+          },
+          "project_name": {
+            "type": "string",
+            "description": "Project display name (required for get/assign/remove)"
+          },
+          "role": {
+            "type": "string",
+            "description": "Role type (required for assign)",
+            "enum": [
+              "connector",
+              "navigator",
+              "builder",
+              "evaluator",
+              "critic",
+              "compiler"
+            ]
+          },
+          "weight": {
+            "type": "number",
+            "description": "Role weight 0.0-1.0 (default 1.0)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Custom role description override"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "forge_lenses",
+      "description": "Manage named lens configurations for gravity-assisted orchestration. A lens is a reusable set of project-role assignments.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Operation: list, get, save, delete",
+            "enum": [
+              "list",
+              "get",
+              "save",
+              "delete"
+            ]
+          },
+          "lens_name": {
+            "type": "string",
+            "description": "Lens name (required for get/save/delete)"
+          },
+          "projects": {
+            "type": "array",
+            "description": "Array of {project_name, role, weight?} for save"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable lens description"
+          },
+          "default_budget": {
+            "type": "integer",
+            "description": "Default budget in chars (default 6000)"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    }
   }
 ]

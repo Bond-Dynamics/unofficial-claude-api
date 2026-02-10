@@ -72,7 +72,7 @@ def main():
                 print("\nResolved targets:")
                 for t in targets:
                     print(f"  {t['claude_name']} ({t['project_uuid'][:8]}...)")
-                    print(f"    Sources: {', '.join(t['internal_names'])}")
+                    print(f"    Sources: {', '.join(t['source_names'])}")
                     print(f"    Types: {', '.join(t['data_types'])}")
                     print(f"    Merge: {t['merge']}")
             return

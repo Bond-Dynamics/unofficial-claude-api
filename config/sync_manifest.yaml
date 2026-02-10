@@ -1,14 +1,10 @@
 version: "1"
 
-# Claude.ai project name → Forge OS internal project name(s)
-# Used to bridge naming differences between Claude.ai and MongoDB
-name_map:
-  "The Reality Compiler": ["Reality Compiler"]
-  "Wavelength": ["Wavelength AI"]
-  "The Nexus": ["*"]
-  "Applied Alchemy — Sovereignty Architect": ["Consciousness Physics", "Attention Framework"]
-  "The Transmutation Forge for Prompt Engineering": ["*"]
-  "Systems Architect": ["Forge OS"]
+# Hub projects that aggregate data from ALL projects.
+# Used by wildcard expansion in sync_manifest.py.
+hub_projects:
+  - "The Nexus"
+  - "The Transmutation Forge for Prompt Engineering"
 
 defaults:
   data_types: [decisions, threads, flags]
@@ -29,28 +25,28 @@ targets:
   # The Nexus — master hub, gets everything merged (no tier filter)
   "019bc294-25a6-7091-8e6a-f8d3d96a984a":
     name: "The Nexus"
-    data_types: [decisions, threads, conflicts, flags, lineage_summary]
+    data_types: [decisions, threads, conflicts, flags, lineage_summary, entanglement]
     merge: true
 
   # Transmutation Forge — all projects merged (mirrors Nexus)
   "019bada7-4d10-7120-9ce5-c0501327419c":
     name: "The Transmutation Forge for Prompt Engineering"
-    data_types: [decisions, threads, conflicts, flags, lineage_summary]
+    data_types: [decisions, threads, conflicts, flags, lineage_summary, entanglement]
     merge: true
 
   # -----------------------------------------------------------------------
   # Domain projects (self-sync + cross-project sources)
   # -----------------------------------------------------------------------
 
-  # The Reality Compiler — own + Attention Framework
+  # The Reality Compiler — own + Applied Alchemy cross-pollination
   "019ba882-8b2c-72e0-a697-0cfac00a6331":
     name: "The Reality Compiler"
-    additional_sources: ["Attention Framework"]
+    additional_sources: ["Applied Alchemy — Sovereignty Architect"]
 
-  # Wavelength — own + Attention Framework (high-confidence only)
+  # Wavelength — own + Applied Alchemy cross-pollination (high-confidence only)
   "019aac4c-5591-7119-8ddf-c78992ffdbf4":
     name: "Wavelength"
-    additional_sources: ["Attention Framework"]
+    additional_sources: ["Applied Alchemy — Sovereignty Architect"]
     filters:
       min_tier: 0.7
 
