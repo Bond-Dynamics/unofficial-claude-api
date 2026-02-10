@@ -9,10 +9,13 @@ from datetime import datetime, timedelta, timezone
 
 from vectordb.config import (
     COLLECTION_THREAD_REGISTRY,
+    EMBEDDING_DIMENSIONS,
     STALE_MAX_DAYS,
     STALE_MAX_HOPS,
 )
+from vectordb.blob_store import store as blob_store
 from vectordb.db import get_database
+from vectordb.embeddings import embed_texts
 from vectordb.events import emit_event
 from vectordb.uuidv8 import thread_id as derive_thread_uuid
 
@@ -63,6 +66,9 @@ def upsert_thread(
 
     existing = collection.find_one({"uuid": thread_uuid})
 
+    title_blob_ref = blob_store(title)
+    resolution_blob_ref = blob_store(resolution) if resolution else None
+
     doc = {
         "uuid": thread_uuid,
         "local_id": local_id,
@@ -80,9 +86,18 @@ def upsert_thread(
         "last_validated": now,
         "updated_at": now.isoformat(),
     }
+    if title_blob_ref:
+        doc["title_blob_ref"] = title_blob_ref
+    if resolution_blob_ref:
+        doc["resolution_blob_ref"] = resolution_blob_ref
 
     if existing is None:
         doc["created_at"] = now.isoformat()
+        try:
+            embeddings = embed_texts([title[:8000]])
+            doc["embedding"] = embeddings[0] if embeddings else [0.0] * EMBEDDING_DIMENSIONS
+        except Exception:
+            doc["embedding"] = [0.0] * EMBEDDING_DIMENSIONS
         collection.insert_one(doc)
         action = "inserted"
     else:
@@ -98,8 +113,18 @@ def upsert_thread(
         }
         if resolution:
             update_fields["resolution"] = resolution
+            res_ref = blob_store(resolution)
+            if res_ref:
+                update_fields["resolution_blob_ref"] = res_ref
         if epistemic_tier is not None:
             update_fields["epistemic_tier"] = epistemic_tier
+        if existing.get("title") != title:
+            try:
+                embeddings = embed_texts([title[:8000]])
+                update_fields["embedding"] = embeddings[0] if embeddings else [0.0] * EMBEDDING_DIMENSIONS
+            except Exception:
+                pass
+            update_fields["title"] = title
         collection.update_one({"uuid": thread_uuid}, {"$set": update_fields})
         action = "updated"
 
@@ -168,15 +193,18 @@ def resolve_thread(thread_uuid, resolution, db=None):
     collection = db[COLLECTION_THREAD_REGISTRY]
     now = datetime.now(timezone.utc)
 
+    update_fields = {
+        "status": "resolved",
+        "resolution": resolution,
+        "updated_at": now.isoformat(),
+    }
+    resolution_ref = blob_store(resolution)
+    if resolution_ref:
+        update_fields["resolution_blob_ref"] = resolution_ref
+
     collection.update_one(
         {"uuid": thread_uuid},
-        {
-            "$set": {
-                "status": "resolved",
-                "resolution": resolution,
-                "updated_at": now.isoformat(),
-            }
-        },
+        {"$set": update_fields},
     )
 
     emit_event(

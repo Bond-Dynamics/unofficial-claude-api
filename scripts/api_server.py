@@ -52,6 +52,17 @@ from vectordb.attention import (
     project_context as attention_project_context,
     recall as attention_recall,
 )
+from vectordb.gravity import orchestrate as gravity_orchestrate
+from vectordb.project_roles import (
+    assign_role,
+    delete_lens,
+    get_lens,
+    get_role,
+    list_lenses,
+    list_roles,
+    remove_role,
+    save_lens,
+)
 from vectordb.scratchpad import scratchpad_list, scratchpad_set
 
 
@@ -1021,6 +1032,132 @@ def api_forge_projects():
         )
 
     return _json(projects)
+
+
+# ---------------------------------------------------------------------------
+# Blob Store
+# ---------------------------------------------------------------------------
+
+@app.get("/api/forge/blob-stats")
+def api_forge_blob_stats():
+    """Return content-addressed blob store statistics."""
+    from vectordb.blob_store import blob_stats
+    return _json(blob_stats())
+
+
+# ---------------------------------------------------------------------------
+# Gravity Assist (Layer 3.5)
+# ---------------------------------------------------------------------------
+
+class ForgeOrchestrateBody(BaseModel):
+    query: str
+    lens_name: Optional[str] = None
+    lenses: Optional[list[dict]] = None
+    budget: Optional[int] = None
+
+
+class ForgeRoleAssignBody(BaseModel):
+    project_name: str
+    role: str
+    weight: Optional[float] = 1.0
+    description: Optional[str] = None
+
+
+class ForgeLensSaveBody(BaseModel):
+    lens_name: str
+    projects: list[dict]
+    description: Optional[str] = None
+    default_budget: Optional[int] = 6000
+
+
+@app.post("/api/forge/orchestrate")
+def api_forge_orchestrate(body: ForgeOrchestrateBody):
+    """Multi-lens gravity-assisted recall across project roles."""
+    from vectordb.events import emit_event as _emit_event
+
+    result = gravity_orchestrate(
+        query=body.query,
+        lenses=body.lenses,
+        lens_name=body.lens_name,
+        budget=body.budget,
+    )
+
+    _emit_event("forge.api.orchestrate", {
+        "query": body.query[:100],
+        "lens_name": body.lens_name,
+        "lens_count": len(result.get("lenses_used", [])),
+        "coherence": result.get("field_summary", {}).get("field_coherence"),
+    })
+
+    return _json(result)
+
+
+@app.get("/api/forge/roles")
+def api_forge_roles_list():
+    """List all project role assignments."""
+    return _json(list_roles())
+
+
+@app.get("/api/forge/roles/{project_name}")
+def api_forge_role_get(project_name: str):
+    """Get the role assignment for a specific project."""
+    result = get_role(project_name)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No role assigned to '{project_name}'")
+    return _json(result)
+
+
+@app.post("/api/forge/roles")
+def api_forge_role_assign(body: ForgeRoleAssignBody):
+    """Assign an epistemic role to a project."""
+    result = assign_role(
+        project_name=body.project_name,
+        role=body.role,
+        weight=body.weight if body.weight is not None else 1.0,
+        description=body.description,
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return _json(result)
+
+
+@app.delete("/api/forge/roles/{project_name}")
+def api_forge_role_remove(project_name: str):
+    """Remove a project's role assignment."""
+    return _json(remove_role(project_name))
+
+
+@app.get("/api/forge/lenses")
+def api_forge_lenses_list():
+    """List all saved lens configurations."""
+    return _json(list_lenses())
+
+
+@app.get("/api/forge/lenses/{lens_name}")
+def api_forge_lens_get(lens_name: str):
+    """Get a named lens configuration."""
+    result = get_lens(lens_name)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Lens not found: '{lens_name}'")
+    return _json(result)
+
+
+@app.post("/api/forge/lenses")
+def api_forge_lens_save(body: ForgeLensSaveBody):
+    """Save a named lens configuration."""
+    result = save_lens(
+        lens_name=body.lens_name,
+        projects=body.projects,
+        description=body.description,
+        default_budget=body.default_budget or 6000,
+    )
+    return _json(result)
+
+
+@app.delete("/api/forge/lenses/{lens_name}")
+def api_forge_lens_delete(lens_name: str):
+    """Delete a named lens configuration."""
+    return _json(delete_lens(lens_name))
 
 
 # ---------------------------------------------------------------------------

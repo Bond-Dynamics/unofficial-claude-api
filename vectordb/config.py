@@ -122,3 +122,20 @@ CATEGORY_BOOSTS = {
 ATTENTION_DEFAULT_BUDGET = 4000
 ATTENTION_FRESHNESS_HALF_LIFE = 30  # days
 ATTENTION_MIN_SCORE = 0.1
+
+# Gravity assist configuration (Layer 3.5)
+COLLECTION_PROJECT_ROLES = "project_roles"
+COLLECTION_LENS_CONFIGURATIONS = "lens_configurations"
+
+GRAVITY_DEFAULT_BUDGET = 6000
+GRAVITY_CONVERGENCE_BOOST = 1.3
+GRAVITY_CONVERGENCE_THRESHOLD = 0.70
+GRAVITY_DIVERGENCE_TIER_DELTA = 0.25
+GRAVITY_MAX_LENSES = 6
+GRAVITY_BASELINE_COHERENCE = 0.5
+
+# Blob store configuration (content-addressed storage)
+BLOB_STORE_BACKEND = os.environ.get("BLOB_STORE_BACKEND", "local")
+BLOB_STORE_LOCAL_PATH = str(Path(__file__).parent.parent / "data" / "blobs")
+BLOB_STORE_GCS_BUCKET = os.environ.get("BLOB_STORE_GCS_BUCKET", "")
+BLOB_STORE_ENABLED = os.environ.get("BLOB_STORE_ENABLED", "true").lower() == "true"

@@ -1,6 +1,6 @@
 """Forge OS MCP Server — Semantic memory tools for LLMs.
 
-Exposes 15 tools via the Model Context Protocol (stdio transport).
+Exposes 18 tools via the Model Context Protocol (stdio transport).
 All tools return JSON strings. Write tools include action/uuid fields.
 Error handling wraps all calls — exceptions never propagate to MCP transport.
 
@@ -24,6 +24,17 @@ from mcp.server.fastmcp import FastMCP
 
 from vectordb.attention import alerts, context_load, project_context, recall
 from vectordb.conversation_registry import list_projects, resolve_id
+from vectordb.gravity import orchestrate as gravity_orchestrate
+from vectordb.project_roles import (
+    assign_role,
+    delete_lens,
+    get_lens,
+    get_role,
+    list_lenses,
+    list_roles,
+    remove_role,
+    save_lens,
+)
 from vectordb.db import get_database
 from vectordb.entanglement import get_latest_scan
 from vectordb.events import emit_event
@@ -648,6 +659,189 @@ def forge_projects() -> str:
             )
 
         return _json_response(projects)
+    except Exception as e:
+        return _json_response({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Tool 15: forge_orchestrate — Gravity-assisted multi-lens recall
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def forge_orchestrate(
+    query: str,
+    lens_name: Optional[str] = None,
+    lenses: Optional[str] = None,
+    budget: Optional[int] = None,
+) -> str:
+    """Multi-lens gravity-assisted recall across project roles.
+
+    Runs attention-weighted recall through multiple project lenses in
+    parallel, then detects convergence (where lenses agree) and divergence
+    (where they disagree). Returns a combined gravity field with coherence
+    score.
+
+    Args:
+        query: What to search for (natural language).
+        lens_name: Named lens configuration to use (e.g. "gravity-assist").
+        lenses: JSON array of lens objects [{project_name, role, weight?}, ...].
+            Overrides lens_name if both provided.
+        budget: Max characters for combined output (default 6000).
+    """
+    try:
+        parsed_lenses = None
+        if lenses:
+            parsed_lenses = json.loads(lenses)
+
+        result = gravity_orchestrate(
+            query=query,
+            lenses=parsed_lenses,
+            lens_name=lens_name,
+            budget=budget,
+        )
+
+        emit_event("forge.mcp.orchestrate", {
+            "query": query[:100],
+            "lens_name": lens_name,
+            "lens_count": len(result.get("lenses_used", [])),
+            "coherence": result.get("field_summary", {}).get("field_coherence"),
+            "session": _SESSION_ID,
+        })
+
+        return _json_response(result)
+    except Exception as e:
+        return _json_response({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Tool 16: forge_roles — Manage project role assignments
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def forge_roles(
+    action: str,
+    project_name: Optional[str] = None,
+    role: Optional[str] = None,
+    weight: Optional[float] = None,
+    description: Optional[str] = None,
+) -> str:
+    """Manage project epistemic role assignments for gravity assist.
+
+    Roles define how a project's knowledge bends the LLM probability field.
+    Available roles: connector, navigator, builder, evaluator, critic, compiler.
+
+    Args:
+        action: Operation to perform. Options: list, get, assign, remove.
+        project_name: Project display name (required for get/assign/remove).
+        role: Role type (required for assign).
+        weight: Role weight 0.0-1.0 (optional, default 1.0).
+        description: Custom role description override (optional).
+    """
+    try:
+        if action == "list":
+            return _json_response(list_roles())
+
+        if action == "get":
+            if not project_name:
+                return _json_response({"error": "project_name required for 'get'"})
+            result = get_role(project_name)
+            if result is None:
+                return _json_response({"error": f"No role assigned to '{project_name}'"})
+            return _json_response(result)
+
+        if action == "assign":
+            if not project_name or not role:
+                return _json_response({"error": "project_name and role required for 'assign'"})
+            result = assign_role(
+                project_name=project_name,
+                role=role,
+                weight=weight if weight is not None else 1.0,
+                description=description,
+            )
+            return _json_response(result)
+
+        if action == "remove":
+            if not project_name:
+                return _json_response({"error": "project_name required for 'remove'"})
+            return _json_response(remove_role(project_name))
+
+        return _json_response({"error": f"Unknown action '{action}'. Use: list, get, assign, remove"})
+    except Exception as e:
+        return _json_response({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Tool 17: forge_lenses — Manage named lens configurations
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def forge_lenses(
+    action: str,
+    lens_name: Optional[str] = None,
+    projects: Optional[str] = None,
+    description: Optional[str] = None,
+    default_budget: Optional[int] = None,
+) -> str:
+    """Manage named lens configurations for gravity-assisted orchestration.
+
+    A lens is a reusable set of project-role assignments. For example,
+    the "gravity-assist" lens pairs The Nexus (connector) with
+    The Cartographer's Codex (navigator).
+
+    Args:
+        action: Operation to perform. Options: list, get, save, delete.
+        lens_name: Lens name (required for get/save/delete).
+        projects: JSON array of [{project_name, role, weight?}] for save.
+        description: Human-readable lens description (for save).
+        default_budget: Default budget in chars (for save, default 6000).
+    """
+    try:
+        if action == "list":
+            return _json_response(list_lenses())
+
+        if action == "get":
+            if not lens_name:
+                return _json_response({"error": "lens_name required for 'get'"})
+            result = get_lens(lens_name)
+            if result is None:
+                return _json_response({"error": f"Lens not found: '{lens_name}'"})
+            return _json_response(result)
+
+        if action == "save":
+            if not lens_name or not projects:
+                return _json_response({"error": "lens_name and projects required for 'save'"})
+            parsed_projects = json.loads(projects)
+            result = save_lens(
+                lens_name=lens_name,
+                projects=parsed_projects,
+                description=description,
+                default_budget=default_budget or 6000,
+            )
+            return _json_response(result)
+
+        if action == "delete":
+            if not lens_name:
+                return _json_response({"error": "lens_name required for 'delete'"})
+            return _json_response(delete_lens(lens_name))
+
+        return _json_response({"error": f"Unknown action '{action}'. Use: list, get, save, delete"})
+    except Exception as e:
+        return _json_response({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Tool 18: forge_blob_stats — Blob store statistics
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def forge_blob_stats() -> str:
+    """Return content-addressed blob store statistics.
+
+    Shows blob count, total size in bytes, and backend type (local or gcs).
+    """
+    try:
+        from vectordb.blob_store import blob_stats
+        return _json_response(blob_stats())
     except Exception as e:
         return _json_response({"error": str(e)})
 

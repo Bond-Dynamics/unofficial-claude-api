@@ -5,6 +5,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from vectordb.blob_store import store as blob_store
 from vectordb.classifier import classify_content
 from vectordb.config import (
     COLLECTION_CODE_REPOS,
@@ -54,7 +55,7 @@ def _load_conversation(path):
         return None
 
 
-def _embed_published_artifacts(db, voyage):
+def _embed_published_artifacts(db, voyage, force=False):
     """Embed published artifacts into the published_artifacts collection."""
     if not PUBLISHED_DIR.exists():
         return 0
@@ -77,12 +78,13 @@ def _embed_published_artifacts(db, voyage):
             continue
 
         # Skip if already embedded
-        existing = col.find_one(
-            {"artifact_uuid": artifact_uuid},
-            {"updated_at": 1},
-        )
-        if existing and existing.get("updated_at") == artifact.get("updated_at", ""):
-            continue
+        if not force:
+            existing = col.find_one(
+                {"artifact_uuid": artifact_uuid},
+                {"updated_at": 1},
+            )
+            if existing and existing.get("updated_at") == artifact.get("updated_at", ""):
+                continue
 
         # Build text for embedding from artifact content
         content = artifact.get("artifact_content", "")
@@ -98,32 +100,36 @@ def _embed_published_artifacts(db, voyage):
         conversation_uuid = artifact.get("conversation_uuid", "")
         project_name = artifact.get("project_name", "")
 
+        content_blob_ref = blob_store(content) if content else None
+
+        update_doc = {
+            "artifact_uuid": artifact_uuid,
+            "title": title,
+            "content": content[:4000],
+            "embedding": embeddings[0],
+            "content_type": content_type,
+            "conversation_id": conversation_uuid,
+            "project_name": project_name,
+            "artifact_type": artifact.get("type", ""),
+            "language": artifact.get("language", ""),
+            "created_at": artifact.get("created_at", ""),
+            "updated_at": artifact.get("updated_at", ""),
+            "metadata": {
+                k: v for k, v in artifact.items()
+                if k not in (
+                    "published_artifact_uuid", "artifact_content",
+                    "title", "name", "type", "language",
+                    "created_at", "updated_at", "conversation_uuid",
+                    "project_name",
+                )
+            },
+        }
+        if content_blob_ref:
+            update_doc["content_blob_ref"] = content_blob_ref
+
         col.update_one(
             {"artifact_uuid": artifact_uuid},
-            {
-                "$set": {
-                    "artifact_uuid": artifact_uuid,
-                    "title": title,
-                    "content": content[:4000],
-                    "embedding": embeddings[0],
-                    "content_type": content_type,
-                    "conversation_id": conversation_uuid,
-                    "project_name": project_name,
-                    "artifact_type": artifact.get("type", ""),
-                    "language": artifact.get("language", ""),
-                    "created_at": artifact.get("created_at", ""),
-                    "updated_at": artifact.get("updated_at", ""),
-                    "metadata": {
-                        k: v for k, v in artifact.items()
-                        if k not in (
-                            "published_artifact_uuid", "artifact_content",
-                            "title", "name", "type", "language",
-                            "created_at", "updated_at", "conversation_uuid",
-                            "project_name",
-                        )
-                    },
-                }
-            },
+            {"$set": update_doc},
             upsert=True,
         )
         embedded += 1
@@ -131,7 +137,7 @@ def _embed_published_artifacts(db, voyage):
     return embedded
 
 
-def _embed_code_sessions(db, voyage):
+def _embed_code_sessions(db, voyage, force=False):
     """Embed Claude Code sessions into the code_sessions collection."""
     if not SESSIONS_DIR.exists():
         return 0
@@ -154,12 +160,13 @@ def _embed_code_sessions(db, voyage):
             continue
 
         # Skip if already embedded and unchanged
-        existing = col.find_one(
-            {"session_id": session_id},
-            {"updated_at": 1},
-        )
-        if existing and existing.get("updated_at") == session.get("updated_at", ""):
-            continue
+        if not force:
+            existing = col.find_one(
+                {"session_id": session_id},
+                {"updated_at": 1},
+            )
+            if existing and existing.get("updated_at") == session.get("updated_at", ""):
+                continue
 
         # Build text from session context for embedding
         title = session.get("title", session.get("name", ""))
@@ -194,27 +201,31 @@ def _embed_code_sessions(db, voyage):
         project_name = session.get("project_name", "")
         env_id = session.get("environment_id", "")
 
+        summary_blob_ref = blob_store(embed_text)
+
+        update_doc = {
+            "session_id": session_id,
+            "title": title,
+            "summary": embed_text[:2000],
+            "embedding": embeddings[0],
+            "content_type": content_type,
+            "model": model,
+            "status": session.get("status", ""),
+            "project_name": project_name,
+            "environment_id": env_id,
+            "created_at": session.get("created_at", ""),
+            "updated_at": session.get("updated_at", ""),
+            "metadata": {
+                "source_count": len(context.get("sources", [])),
+                "outcome_count": len(context.get("outcomes", [])),
+            },
+        }
+        if summary_blob_ref:
+            update_doc["summary_blob_ref"] = summary_blob_ref
+
         col.update_one(
             {"session_id": session_id},
-            {
-                "$set": {
-                    "session_id": session_id,
-                    "title": title,
-                    "summary": embed_text[:2000],
-                    "embedding": embeddings[0],
-                    "content_type": content_type,
-                    "model": model,
-                    "status": session.get("status", ""),
-                    "project_name": project_name,
-                    "environment_id": env_id,
-                    "created_at": session.get("created_at", ""),
-                    "updated_at": session.get("updated_at", ""),
-                    "metadata": {
-                        "source_count": len(context.get("sources", [])),
-                        "outcome_count": len(context.get("outcomes", [])),
-                    },
-                }
-            },
+            {"$set": update_doc},
             upsert=True,
         )
         embedded += 1
@@ -275,8 +286,12 @@ def _ingest_code_repos(db):
     return ingested
 
 
-def run_pipeline():
-    """Main embedding pipeline: reads conversations, embeds, stores in MongoDB."""
+def run_pipeline(force=False):
+    """Main embedding pipeline: reads conversations, embeds, stores in MongoDB.
+
+    Args:
+        force: If True, re-embed all conversations regardless of updated_at.
+    """
     if not CONVERSATIONS_DIR.exists():
         print(f"No conversations directory found at {CONVERSATIONS_DIR}")
         print("Run fetch_conversations.py first.")
@@ -317,13 +332,14 @@ def run_pipeline():
         progress = f"[{i + 1}/{len(conversation_files)}]"
 
         # Skip if already embedded with same updated_at
-        existing = conv_col.find_one(
-            {"conversation_id": conv_id},
-            {"updated_at": 1},
-        )
-        if existing and existing.get("updated_at") == updated_at:
-            stats["skipped"] += 1
-            continue
+        if not force:
+            existing = conv_col.find_one(
+                {"conversation_id": conv_id},
+                {"updated_at": 1},
+            )
+            if existing and existing.get("updated_at") == updated_at:
+                stats["skipped"] += 1
+                continue
 
         messages = conv.get("chat_messages", [])
         project_name = conv.get("project_name", "No Project")
@@ -428,10 +444,10 @@ def run_pipeline():
 
     # Embed published artifacts, code sessions, and ingest code repos
     print("\nProcessing published artifacts...")
-    stats["published_artifacts"] = _embed_published_artifacts(db, voyage)
+    stats["published_artifacts"] = _embed_published_artifacts(db, voyage, force=force)
 
     print("Processing Claude Code sessions...")
-    stats["code_sessions"] = _embed_code_sessions(db, voyage)
+    stats["code_sessions"] = _embed_code_sessions(db, voyage, force=force)
 
     print("Ingesting code repos...")
     stats["code_repos"] = _ingest_code_repos(db)
@@ -459,4 +475,4 @@ def run_pipeline():
 
 
 if __name__ == "__main__":
-    run_pipeline()
+    run_pipeline(force="--force" in sys.argv)

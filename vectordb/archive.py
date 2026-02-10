@@ -10,6 +10,7 @@ from vectordb.config import (
     RETENTION_DAYS_365,
     RETENTION_PERMANENT,
 )
+from vectordb.blob_store import store as blob_store
 from vectordb.db import get_database
 from vectordb.events import emit_event
 
@@ -49,6 +50,8 @@ def archive_store(source_collection, source_id, content_summary,
             now.timestamp() + (retention_days * 86400), tz=timezone.utc
         )
 
+    content_summary_blob_ref = blob_store(content_summary)
+
     doc = {
         "archive_id": archive_id,
         "source_collection": source_collection,
@@ -59,6 +62,8 @@ def archive_store(source_collection, source_id, content_summary,
         "metadata": metadata or {},
         "created_at": now.isoformat(),
     }
+    if content_summary_blob_ref:
+        doc["content_summary_blob_ref"] = content_summary_blob_ref
 
     db[COLLECTION_ARCHIVE].insert_one(doc)
 

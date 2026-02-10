@@ -12,6 +12,7 @@ from vectordb.config import (
     PATTERN_MERGE_THRESHOLD,
     VECTOR_INDEX_NAME,
 )
+from vectordb.blob_store import store as blob_store
 from vectordb.db import get_database
 from vectordb.embeddings import embed_query, embed_texts
 from vectordb.events import emit_event
@@ -125,6 +126,8 @@ def _insert_pattern(collection, content, embedding, pattern_type, success_score,
     now = datetime.now(timezone.utc)
     pattern_id = f"pat_{uuid.uuid4().hex[:12]}"
 
+    content_blob_ref = blob_store(content)
+
     doc = {
         "pattern_id": pattern_id,
         "pattern_type": pattern_type,
@@ -143,6 +146,8 @@ def _insert_pattern(collection, content, embedding, pattern_type, success_score,
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
     }
+    if content_blob_ref:
+        doc["content_blob_ref"] = content_blob_ref
 
     collection.insert_one(doc)
 

@@ -7,6 +7,7 @@ Detects conflicts between decisions using:
 
 import re
 
+from vectordb.blob_store import get_text_with_fallback
 from vectordb.config import (
     COLLECTION_DECISION_REGISTRY,
     DECISION_CONFLICT_SIMILARITY_THRESHOLD,
@@ -115,9 +116,10 @@ def _detect_by_similarity(decision_text, project, exclude_uuid, db):
             continue
 
         severity = "high" if similarity > 0.92 else "medium"
+        existing_text = get_text_with_fallback(doc, "text", "text_blob_ref")
         conflicts.append({
             "existing_uuid": doc["uuid"],
-            "existing_text": doc.get("text", "")[:500],
+            "existing_text": existing_text[:500],
             "signal": "embedding_similarity",
             "similarity": round(similarity, 4),
             "shared_entities": [],
@@ -149,7 +151,8 @@ def _detect_by_entities(
     for doc in candidates:
         if doc["uuid"] in already_flagged:
             continue
-        existing_entities = _extract_entities(doc.get("text", ""))
+        existing_text = get_text_with_fallback(doc, "text", "text_blob_ref")
+        existing_entities = _extract_entities(existing_text)
         shared = entities & existing_entities
         if not shared:
             continue
@@ -163,7 +166,7 @@ def _detect_by_entities(
         severity = "high" if abs(existing_tier - decision_tier) > 0.4 else "medium"
         conflicts.append({
             "existing_uuid": doc["uuid"],
-            "existing_text": doc.get("text", "")[:500],
+            "existing_text": existing_text[:500],
             "signal": "entity_tier_divergence",
             "similarity": 0.0,
             "shared_entities": sorted(shared),

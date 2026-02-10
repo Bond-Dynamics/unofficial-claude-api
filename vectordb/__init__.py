@@ -111,12 +111,32 @@ from vectordb.claude_api import (
     get_session,
     reset_session,
 )
+from vectordb.gravity import orchestrate as gravity_orchestrate
+from vectordb.project_roles import (
+    assign_role,
+    delete_lens,
+    get_lens,
+    get_role,
+    list_lenses,
+    list_roles,
+    remove_role,
+    save_lens,
+)
 from vectordb.sync_manifest import (
     load_manifest,
     resolve_all_targets,
     validate_manifest,
 )
 from vectordb.sync_engine import sync_all, sync_one
+from vectordb.blob_store import (
+    BlobNotFoundError,
+    blob_stats,
+    get_text_with_fallback,
+    resolve_documents,
+    store as blob_store_store,
+    resolve as blob_resolve,
+    resolve_batch as blob_resolve_batch,
+)
 from vectordb.vector_store import vector_search, vector_store
 
 __all__ = [
@@ -231,4 +251,22 @@ __all__ = [
     "validate_manifest",
     "sync_all",
     "sync_one",
+    # Blob store (content-addressed storage)
+    "BlobNotFoundError",
+    "blob_stats",
+    "blob_store_store",
+    "blob_resolve",
+    "blob_resolve_batch",
+    "get_text_with_fallback",
+    "resolve_documents",
+    # Gravity assist (Layer 3.5)
+    "gravity_orchestrate",
+    "assign_role",
+    "get_role",
+    "list_roles",
+    "remove_role",
+    "save_lens",
+    "get_lens",
+    "list_lenses",
+    "delete_lens",
 ]

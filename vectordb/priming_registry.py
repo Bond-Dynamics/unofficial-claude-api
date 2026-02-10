@@ -15,6 +15,7 @@ from vectordb.config import (
     PRIMING_TERRITORY_MATCH_THRESHOLD,
     VECTOR_INDEX_NAME,
 )
+from vectordb.blob_store import store as blob_store
 from vectordb.db import get_database
 from vectordb.embeddings import embed_texts
 from vectordb.events import emit_event
@@ -83,6 +84,8 @@ def upsert_priming_block(
 
     existing = collection.find_one({"uuid": priming_uuid})
 
+    content_blob_ref = blob_store(content)
+
     if existing is not None:
         update_fields = {
             "territory_keys": keys_list,
@@ -93,6 +96,8 @@ def upsert_priming_block(
             "confidence_floor": confidence_floor,
             "updated_at": now.isoformat(),
         }
+        if content_blob_ref:
+            update_fields["content_blob_ref"] = content_blob_ref
         if source_expedition:
             update_fields["source_expeditions"] = list(set(
                 existing.get("source_expeditions", []) + [source_expedition]
@@ -120,6 +125,8 @@ def upsert_priming_block(
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }
+        if content_blob_ref:
+            doc["content_blob_ref"] = content_blob_ref
         collection.insert_one(doc)
         action = "inserted"
 

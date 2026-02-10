@@ -7,6 +7,7 @@ lightweight markers that can later be compiled into full findings.
 
 from datetime import datetime, timezone
 
+from vectordb.blob_store import store as blob_store
 from vectordb.config import COLLECTION_EXPEDITION_FLAGS
 from vectordb.db import get_database
 from vectordb.events import emit_event
@@ -59,6 +60,9 @@ def plant_flag(
     if existing is not None:
         return {"action": "existing", "uuid": flag_uuid}
 
+    description_blob_ref = blob_store(description)
+    context_blob_ref = blob_store(context) if context else None
+
     doc = {
         "uuid": flag_uuid,
         "description": description[:4000],
@@ -72,6 +76,10 @@ def plant_flag(
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
     }
+    if description_blob_ref:
+        doc["description_blob_ref"] = description_blob_ref
+    if context_blob_ref:
+        doc["context_blob_ref"] = context_blob_ref
 
     collection.insert_one(doc)
 

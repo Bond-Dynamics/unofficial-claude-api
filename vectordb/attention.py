@@ -31,6 +31,7 @@ from vectordb.config import (
     COLLECTION_THREAD_REGISTRY,
     VECTOR_INDEX_NAME,
 )
+from vectordb.blob_store import get_text_with_fallback
 from vectordb.db import get_database
 from vectordb.embeddings import embed_query
 
@@ -171,10 +172,19 @@ def _search_collection(collection_name, query_embedding, project, limit, min_sim
     except Exception:
         return []
 
+    # Map text_field -> blob ref field name
+    _ref_field_map = {
+        "text": "text_blob_ref",
+        "title": "title_blob_ref",
+        "content": "content_blob_ref",
+        "summary": "summary_blob_ref",
+    }
+
     enriched = []
     for doc in results:
         doc_id = doc.pop("_id", None)
-        text_value = doc.get(text_field, "")
+        ref_field = _ref_field_map.get(text_field)
+        text_value = get_text_with_fallback(doc, text_field, ref_field)
         if isinstance(text_value, list):
             text_value = ", ".join(str(v) for v in text_value)
 
@@ -331,6 +341,7 @@ def recall(
     budget=None,
     min_score=None,
     collections=None,
+    query_embedding=None,
     db=None,
 ):
     """Cross-collection attention-weighted recall.
@@ -361,7 +372,8 @@ def recall(
     if min_score is None:
         min_score = ATTENTION_MIN_SCORE
 
-    query_embedding = embed_query(query)
+    if query_embedding is None:
+        query_embedding = embed_query(query)
 
     per_collection_results = _parallel_search(
         query_embedding, project, limit=10, min_sim=min_score, db=db,

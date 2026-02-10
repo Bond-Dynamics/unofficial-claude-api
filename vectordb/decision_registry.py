@@ -19,6 +19,7 @@ from vectordb.config import (
 from vectordb.conflicts import detect_conflicts, register_conflict
 from vectordb.db import get_database
 from vectordb.embeddings import embed_texts
+from vectordb.blob_store import store as blob_store
 from vectordb.events import emit_event
 from vectordb.uuidv8 import decision_id as derive_decision_uuid
 
@@ -119,6 +120,7 @@ def _update_decision(
     embeddings = embed_texts([text[:8000]])
     embedding = embeddings[0] if embeddings else [0.0] * EMBEDDING_DIMENSIONS
 
+    text_blob_ref = blob_store(text)
     update_fields = {
         "local_id": local_id,
         "text": text[:8000],
@@ -129,6 +131,8 @@ def _update_decision(
         "last_validated": now,
         "updated_at": now.isoformat(),
     }
+    if text_blob_ref:
+        update_fields["text_blob_ref"] = text_blob_ref
     if epistemic_tier is not None:
         update_fields["epistemic_tier"] = epistemic_tier
     if dependents is not None:
@@ -137,6 +141,9 @@ def _update_decision(
         update_fields["dependencies"] = dependencies
     if rationale is not None:
         update_fields["rationale"] = rationale
+        rationale_blob_ref = blob_store(rationale)
+        if rationale_blob_ref:
+            update_fields["rationale_blob_ref"] = rationale_blob_ref
 
     collection.update_one({"uuid": decision_uuid}, {"$set": update_fields})
 
@@ -157,6 +164,9 @@ def _insert_decision(
     """New UUID: embed, insert, and run conflict detection."""
     embeddings = embed_texts([text[:8000]])
     embedding = embeddings[0] if embeddings else [0.0] * EMBEDDING_DIMENSIONS
+
+    text_blob_ref = blob_store(text)
+    rationale_blob_ref = blob_store(rationale) if rationale else None
 
     doc = {
         "uuid": decision_uuid,
@@ -179,6 +189,10 @@ def _insert_decision(
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
     }
+    if text_blob_ref:
+        doc["text_blob_ref"] = text_blob_ref
+    if rationale_blob_ref:
+        doc["rationale_blob_ref"] = rationale_blob_ref
 
     collection.insert_one(doc)
 
